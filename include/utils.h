@@ -16,6 +16,7 @@ static int findBin( const std::vector<double>& edges, double value){
             return -1;
         }
     }
+    return -1;
 }
 static double mean(const std::vector<double>& v){
     if (v.size()==0) return 0;
@@ -26,7 +27,7 @@ static double mean(const std::vector<double>& v){
     return mean/v.size();
 }
 
-static double std(const std::vector<double>& v){
+static double computeStd(const std::vector<double>& v){
     if (v.size()) return 0;
     double mean = 0.;
     double mean2 = 0.;

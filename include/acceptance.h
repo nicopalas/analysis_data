@@ -1,9 +1,11 @@
 
 #include "constants.h"
 
-static bool loadAcceptanceCSV(const std::string& fname,
-                              double dOmega_csv[nbins_beam_fine][nbins_det_fine])
+static bool loadAcceptanceCSV(const std::string& fname, Vec2D& dOmega)
 {
+    dOmega.assign(nbins_beam_fine,
+        std::vector<double>(nbins_det_fine, 0.0));
+
     std::ifstream fin(fname);
     if(!fin.is_open()){
         std::cerr << "No se pudo abrir " << fname << "\n";
@@ -12,7 +14,7 @@ static bool loadAcceptanceCSV(const std::string& fname,
 
     for(int j = 0; j < nbins_beam_fine; ++j)
         for(int i = 0; i < nbins_det_fine; ++i)
-            dOmega_csv[j][i] = 0.0;
+            dOmega[j][i] = 0.0;
 
     std::string line;
     std::getline(fin, line);
@@ -21,11 +23,11 @@ static bool loadAcceptanceCSV(const std::string& fname,
         if(line.empty()) continue;
 
         std::stringstream ss(line);
-        double cb = 0.0, cd = 0.0, dOmega = 0.0;
+        double cb = 0.0, cd = 0.0, omega = 0.0;
         long long counts = 0;
         char comma1, comma2, comma3;
 
-        ss >> cb >> comma1 >> cd >> comma2 >> counts >> comma3 >> dOmega;
+        ss >> cb >> comma1 >> cd >> comma2 >> counts >> comma3 >> omega;
         if(!ss) continue;
 
         int j = static_cast<int>(cb / dcos_beam_fine);
@@ -37,15 +39,15 @@ static bool loadAcceptanceCSV(const std::string& fname,
         if(j < 0 || j >= nbins_beam_fine) continue;
         if(i < 0 || i >= nbins_det_fine)  continue;
 
-        dOmega_csv[j][i] = dOmega;
+        dOmega[j][i] = omega;
     }
 
     return true;
 }
 
-static void rebin(const double fine[nbins_beam_fine][nbins_det_fine],
-                  double coarse[nbins_beam][nbins_det])
+static Vec2D rebin(const Vec2D& fine)
 {
+    Vec2D coarse(nbins_beam, std::vector<double>(nbins_det, 0.0));
     const int ratio_beam = nbins_beam_fine / nbins_beam;
     const int ratio_det  = nbins_det_fine  / nbins_det;
 
@@ -66,4 +68,5 @@ static void rebin(const double fine[nbins_beam_fine][nbins_det_fine],
             coarse[ib][id] = sum;
         }
     }
+    return coarse;
 }

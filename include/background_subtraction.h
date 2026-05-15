@@ -1,4 +1,5 @@
 #pragma once
+#include "types.h" 
 #include "config.h"
 #include "TH1D.h"
 #include "TF1.h"
@@ -10,6 +11,7 @@
 struct BackgroundFit {
     double counts_subtract  = 0.0;
     double u_counts_subtract = 0.0;
+    double chi2ndf           = 0.0;
     TF1*   func             = nullptr;
     TH1D*  hist_subtracted  = nullptr;
 }; 
@@ -21,8 +23,8 @@ struct BackgroundFit {
 // -------------------------------------------------------
 static std::string getBackgroundFormula(Sample sample){
     switch(sample){
-        case Sample::Uranium: return "[0]+[1]*x";
-        case Sample::Gold:    return "[0]+[1]*x+[2]*x*x"
+        case Sample::uranium: return "[0]+[1]*x";
+        case Sample::gold:    return "[0]+[1]*x+[2]*x*x"
                                      " + [3]*TMath::Gaus(x,[4],[5],1)"
                                      " + [6]*TMath::Gaus(x,[7],[8],1)";
     }
@@ -31,10 +33,10 @@ static std::string getBackgroundFormula(Sample sample){
 
 static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
     switch(sample){
-        case Sample::Uranium:
+        case Sample::uranium:
             f->SetParLimits(0, 0, 1e5);
             break;
-        case Sample::Gold:
+        case Sample::gold:
             f->SetParLimits(0,  0.0,  1e6);
             f->SetParLimits(1, -5.0,  5.0);
             f->SetParLimits(2, -1.0,  1.0);
@@ -71,7 +73,7 @@ static BackgroundFit fitBackground(
                      formula.c_str(), xmin, xmax);
     setBackgroundParameters(f, cfg.sample, h);
 
-    TH1D* h_tails = (TH1D*)h->Clone("h_tails_tmp");  
+    TH1D* h_tails = (TH1D*)h->Clone(Form("h_tails_%s_%d", cfg.output_tag.c_str(), ebin));
     for(int b = 1; b <= ntot; ++b){                
         double x = h_tails->GetBinCenter(b);    
         if(x > roi_min && x < roi_max){
@@ -79,8 +81,21 @@ static BackgroundFit fitBackground(
             h_tails->SetBinError(b, 1e10);
         }
     }
-    h_tails->Fit(f, "IRS Q", "", xmin, xmax);
+    h_tails->Fit(f, "IRS", "", xmin, xmax);
     delete h_tails;
+    double chi2 = 0.0;
+    int    ndf  = 0;
+    for(int b = 1; b <= ntot; ++b){
+        double x   = h->GetBinCenter(b);
+        double obs = h->GetBinContent(b);
+        double err = h->GetBinError(b);
+        if(err <= 0) continue;
+        if(x > roi_min && x < roi_max) continue;  // skip signal region
+        chi2 += std::pow((obs - f->Eval(x)) / err, 2);
+        ndf++;
+    }
+    ndf -= f->GetNpar();
+    result.chi2ndf = (ndf > 0) ? chi2 / ndf : 0.0;
 
     // --- nominal background integral ---
     result.counts_subtract = f->Integral(roi_min, roi_max);
@@ -98,7 +113,7 @@ static BackgroundFit fitBackground(
         for(int b = 1; b <= ntot; ++b){
             double fluct = rng.Poisson(h->GetBinContent(b));
             h_toy->SetBinContent(b, fluct);            
-            h_toy->SetBinError(b, std::sqrt(fluct));  
+            h_toy->SetBinError(b, fluct > 0 ? std::sqrt(fluct) : 1.0);
         }
 
         TH1D* h_toy_tails = (TH1D*)h_toy->Clone(Form("h_toy_tails_tmp_%d", itoy));

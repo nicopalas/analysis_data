@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-enum class Sample {uranium, gold, cerium};
+enum class Sample {uranium, gold};
 
 struct AnalysisConfig {
     Sample sample;
@@ -14,6 +14,12 @@ struct AnalysisConfig {
 
     std::string efficiency_file;
     std::vector<double> energy_bins_eff;
+    double cos_det_cut = 0.6;
+    int    bins_beam  = 10;
+    int    bins_det   = 10;
+    int    n_toys      = 500;   
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/U-238/data/acceptance_coincidence.csv";
+
 };
 
 static AnalysisConfig makeUraniumConfig(
@@ -21,7 +27,7 @@ static AnalysisConfig makeUraniumConfig(
     const std::string& tag = "nominal")
 {
     AnalysisConfig c;
-    c.sample          = Sample::Uranium;
+    c.sample          = Sample::uranium;
     c.tree_name       = "events_uranium";
     c.input_file      = "/Users/nico/Desktop/Tese/Macros/Macros/n_tof_cerium/ROOT_files/cathode_candidates/coincidences.root";
     c.output_tag      = tag;
@@ -36,7 +42,7 @@ static AnalysisConfig makeGoldConfig(
     const std::string& tag = "nominal")
 {
     AnalysisConfig c;
-    c.sample          = Sample::Gold;
+    c.sample          = Sample::gold;
     c.tree_name       = "events_gold";
     c.input_file      = "/Users/nico/Desktop/Tese/Macros/Macros/n_tof_cerium/ROOT_files/cathode_candidates/coincidences.root";
     c.output_tag      = tag;

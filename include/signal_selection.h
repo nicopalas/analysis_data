@@ -1,4 +1,5 @@
 #pragma once 
+#include "types.h" 
 #include <cmath>
 
 // ------------------signal_selection.h---------------------
@@ -6,9 +7,7 @@
 // take into account the angular distribution
 
 
-using Vec3D = std::vector<std::vector<std::vector<double>>>;
-
-static void signalSelection(
+static void computeSignal(
     const AnalysisConfig& cfg,
     const Vec3D& counts_roi,
     const Vec3D& counts_bkg,
@@ -21,15 +20,15 @@ static void signalSelection(
     for (int i = 0; i<nbins; i++){
         double totals = 0.0;
         for (int j = 0; j<nbins_beam; j++){
-            for (int ii = 0; ii<nbins_det; ii++){
+            for (int ii = 0; ii<nbins_det; ++ii){
                 totals+=counts_bkg[i][j][ii];
             }
         }
         for (int j = 0; j<nbins_beam; ++j){
-            for (int ii = 0; ii<nbins_det; ii+){
+            for (int ii = 0; ii<nbins_det; ++ii){
                 double w = counts_bkg[i][j][ii]/totals;
-                counts_signal[i][j][ii] = counts_roi[i][j][ii]-w*counts_subtract[i][j][ii];
-                u_counts_signal[i][j][ii] = std::sqrt(counts_roi[e][j][ii]+std::pow(w*u_counts_subtract,2));
+                counts_signal[i][j][ii] = counts_roi[i][j][ii]-w*counts_subtract[i];
+                u_counts_signal[i][j][ii] = std::sqrt(counts_roi[i][j][ii]+std::pow(w*u_counts_subtract[i],2));
             }
         }
     }

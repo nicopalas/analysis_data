@@ -1,10 +1,12 @@
 #pragma once
+#include "types.h" 
+#include "config.h"
 #include "cuts.h"
 #include "constants.h"
 #include "TTree.h"
 #include "TH1D.h"
 #include <vector>
-#include "<cmath>"
+#include <cmath>
 
 
 // ---------------------- histograms.h --------------------------------
@@ -13,14 +15,13 @@
 // 3. fill dt histograms for each region to subtract background
 
 
-using vec3D = std::vector<std::vector<std::vector<double>>>;
 
 static void fillHistograms(
     TTree* tree,
     const AnalysisConfig& cfg,
-    TH1D* hists_tof[],
-    vec3D& counts_roi,
-    vec3D& counts_bkg )
+    std::vector<TH1D*>& hists_tof,
+    Vec3D& counts_roi,
+    Vec3D& counts_bkg )
     {
         int nbins = (int) cfg.energy_bins.size()-1;
 
@@ -42,8 +43,8 @@ static void fillHistograms(
             tree->GetEntry(i);
             int e_bin = findBin (cfg.energy_bins, neutron_energy);
             if(e_bin<0 || e_bin>=nbins) continue;
-
-            EventCuts c = getCuts (cfg.sample, e_bin);
+            if (neutron_energy>1000) continue;
+            EventCuts c = getCuts (cfg.sample, neutron_energy);
             if (!passAmplitudeCut(amp0, amp1, c)) continue;
             if (cos_theta_det<0.0) continue;
             if (cos_theta_det>1 || std::abs(cos_theta)>1) continue;
@@ -51,7 +52,7 @@ static void fillHistograms(
             double dt = tof1-tof0;
             hists_tof[e_bin]->Fill(dt);
 
-            int j = int (std::abs(cos_theta)/dcos_theta);
+            int j = int (std::abs(cos_theta)/dcos_beam);
             int ii = int (cos_theta_det/dcos_det);
             if (j>=nbins_beam) continue;
             if (ii>=nbins_det) continue;

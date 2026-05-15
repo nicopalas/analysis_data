@@ -1,4 +1,5 @@
 #pragma once
+#include "types.h" 
 #include "TCanvas.h"
 #include "TGraphErrors.h"
 #include "TLegend.h"
@@ -9,9 +10,9 @@
 #include <string>
 
 static void plotBackgroundFits(
-    TH1D* hists_tof[],
-    TH1D* hists_sub[],
-    TF1*  fits[],
+    std::vector<TH1D*>& hists_tof,
+    std::vector<TH1D*>& hists_sub,
+    std::vector<TF1*>& fits,
     int   nbins,
     const std::string& outname)
 {
@@ -22,14 +23,14 @@ static void plotBackgroundFits(
         hists_tof[i]->Draw();
         fits[i]->SetLineColor(kRed);
         fits[i]->Draw("same");
-        c->cd(2*i + 2);
+        c->cd(2*i + 2); gPad->SetLogy();
         hists_sub[i]->Draw();
     }
     c->SaveAs(outname.c_str());
 }
 
 static void plotEfficiency(
-    const EfficiencyResult eff[],
+    const std::vector<EfficiencyResult>& eff,
     int nbins,
     int nbins_det,
     const std::vector<double>& energy_bins,
@@ -49,7 +50,7 @@ static void plotEfficiency(
 
     for(int e = 0; e < nbins; ++e){
         TGraphErrors* gr = new TGraphErrors(
-            nbins_det, centers, eff[e].eps, nullptr, eff[e].u_eps);
+            nbins_det, centers, eff[e].eps.data(), nullptr, eff[e].u_eps.data());
         gr->SetMarkerStyle(21);
         gr->SetMarkerColor(colors[e]);
         gr->SetLineColor(colors[e]);

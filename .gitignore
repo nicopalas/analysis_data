@@ -1,0 +1,6 @@
+output/
+*.root
+*.pdf
+*.o
+*.so
+*.d

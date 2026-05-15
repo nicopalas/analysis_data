@@ -38,3 +38,14 @@ static double computeStd(const std::vector<double>& v){
     double var = mean2-mean*mean;
     return std::sqrt(var);
 }
+
+static std::vector<double> buildLogBins(int nbins, double e_min, double e_max){
+    std::vector<double> bins;
+    double log_min = std::log10(e_min);
+    double log_max = std::log10(e_max);
+    for(int i = 0; i <= nbins; ++i){
+        double log_e = log_min + (log_max - log_min) * i / double(nbins);
+        bins.push_back(std::pow(10.0, log_e));
+    }
+    return bins;
+}

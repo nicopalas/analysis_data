@@ -88,6 +88,7 @@ static void plotAnisotropy(
     leg->SetBorderSize(0);
 
     for(int e = 0; e < nbins; ++e){
+        if (e%10 == 0){
         std::vector<double> x(nbins_beam), y(nbins_beam), ex(nbins_beam, 0.0);
         for(int i = 0; i < nbins_beam; ++i){
             x[i] = (i + 0.5) * dcos_beam;
@@ -99,19 +100,21 @@ static void plotAnisotropy(
             ex.data(), aniso[e].u_w.data());
 
         g->SetMarkerStyle(20 + e);
-        g->SetMarkerColor(colors[e]);
-        g->SetLineColor(colors[e]);
+        g->SetMarkerColor(colors[int(e/10)]);
+        g->SetLineColor(colors[int(e/10)]);
         g->SetLineWidth(2);
 
         if(e == 0){
             g->SetTitle(";cos(#theta_{beam});W(#theta)/W(90^{#circ})");
-            g->GetYaxis()->SetRangeUser(0.5, 1.5);
+            g->SetMinimum(0.8);
+            g->SetMaximum(2.0);
             g->Draw("ALP");
         } else {
             g->Draw("LP SAME");
         }
         leg->AddEntry(g, Form("%.0f-%.0f MeV",
                               energy_bins[e], energy_bins[e+1]), "lp");
+        }
     }
     leg->Draw();
     c->SaveAs(outname.c_str());
@@ -120,55 +123,105 @@ static void plotAnisotropy(
 static void plotAnisotropyRatio(
     const std::vector<AnisotropyResult>& aniso,
     int nbins,
+    int nbins_beam,
     const std::vector<double>& energy_bins,
     const std::string& outname)
 {
-    // W0/W90 is just aniso[e].w[0] since everything is normalized to W(90)=1
-    // W0 is the last beam bin (cos_theta ~ 1, i.e. 0 degrees)
-    int bin_0  = 0;              // cos_theta ~ 0 → 90 degrees from beam
-    int bin_90 = nbins_beam - 1; // cos_theta ~ 1 → 0 degrees (beam direction)
+    int bin_0 = nbins_beam - 1;
 
     std::vector<double> E_centers(nbins), ratio(nbins), u_ratio(nbins), ex(nbins, 0.0);
     for(int e = 0; e < nbins; ++e){
         E_centers[e] = std::sqrt(energy_bins[e] * energy_bins[e+1]);
-        ratio[e]     = aniso[e].w[bin_90];    // W(0 deg) normalized to W(90)=1
-        u_ratio[e]   = aniso[e].u_w[bin_90];
+        ratio[e]     = aniso[e].w[bin_0];
+        u_ratio[e]   = aniso[e].u_w[bin_0];
     }
 
+    // ── style ──────────────────────────────────────────────────────────
+    gStyle->SetOptStat(0);
+    gStyle->SetOptTitle(0);
+    gStyle->SetPadTickX(1);
+    gStyle->SetPadTickY(1);
+    gStyle->SetFrameLineWidth(1);
+
+    // fonts: 43 = helvetica, size in pixels
+    gStyle->SetTextFont(43);
+    gStyle->SetLabelFont(43, "XY");
+    gStyle->SetTitleFont(43, "XY");
+    gStyle->SetLabelSize(22, "XY");
+    gStyle->SetTitleSize(26, "XY");
+
+    gStyle->SetTickLength(0.025, "XY");
+    gStyle->SetNdivisions(510, "X");
+    gStyle->SetNdivisions(505, "Y");
+
+    // ── canvas ─────────────────────────────────────────────────────────
+    TCanvas* c = new TCanvas("c_ratio", "", 800, 650);
+    c->SetLogx();
+    c->SetLeftMargin(0.13);
+    c->SetRightMargin(0.04);
+    c->SetTopMargin(0.04);
+    c->SetBottomMargin(0.13);
+
+    // ── graph ──────────────────────────────────────────────────────────
     TGraphErrors* g = new TGraphErrors(
         nbins,
         E_centers.data(), ratio.data(),
         ex.data(),        u_ratio.data());
 
-    g->SetTitle(";E_{n} (MeV);W_{0^{#circ}}/W_{90^{#circ}}");
     g->SetMarkerStyle(20);
-    g->SetMarkerSize(1.2);
-    g->SetMarkerColor(kAzure+3);
-    g->SetLineColor(kAzure+3);
-    g->SetLineWidth(2);
+    g->SetMarkerSize(0.9);
+    g->SetMarkerColor(kAzure+2);
+    g->SetLineColor(kAzure+2);
+    g->SetLineWidth(1);
 
-    TCanvas* c = new TCanvas("c_ratio", "W0/W90 vs Energy", 900, 700);
-    gStyle->SetOptStat(0);
-    c->SetLogx();
-    c->SetLeftMargin(0.15);
-    c->SetBottomMargin(0.15);
-    gPad->SetGrid(1, 1);
+    g->GetXaxis()->SetTitle("Neutron energy  E_{n}  (MeV)");
+    g->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
+    g->GetXaxis()->SetTitleOffset(1.2);
+    g->GetYaxis()->SetTitleOffset(1.3);
+    g->GetYaxis()->SetRangeUser(0.5, 2.2);
+    g->GetXaxis()->SetMoreLogLabels();
+    g->GetXaxis()->SetNoExponent();
 
-    // reference line at 1
-    g->GetYaxis()->SetRangeUser(0.5, 2.0);
-    g->Draw("APL");
+    g->Draw("AP");
 
+    // ── isotropic reference ────────────────────────────────────────────
     TLine* line = new TLine(energy_bins.front(), 1.0, energy_bins.back(), 1.0);
-    line->SetLineStyle(2);
+    line->SetLineStyle(7);       // dashed
     line->SetLineColor(kGray+1);
-    line->SetLineWidth(1);
+    line->SetLineWidth(2);
     line->Draw();
 
-    TLegend* leg = new TLegend(0.55, 0.75, 0.88, 0.88);
+    // ── shaded band ±5% around isotropy ───────────────────────────────
+    int nband = 200;
+    std::vector<double> xb(nband), yhi(nband), ylo(nband);
+    double logA = std::log10(energy_bins.front());
+    double logB = std::log10(energy_bins.back());
+    for(int i = 0; i < nband; ++i){
+        xb[i]  = std::pow(10.0, logA + (logB - logA) * i / (nband - 1));
+        yhi[i] = 1.05;
+        ylo[i] = 0.95;
+    }
+    TGraph* band = new TGraph(2 * nband);
+    for(int i = 0;       i < nband; ++i) band->SetPoint(i,          xb[i],        yhi[i]);
+    for(int i = 0;       i < nband; ++i) band->SetPoint(nband + i,  xb[nband-1-i], ylo[nband-1-i]);
+    band->SetFillColorAlpha(kGray, 0.25);
+    band->SetLineWidth(0);
+    band->Draw("F SAME");
+
+    // redraw graph on top of band
+    g->Draw("P SAME");
+
+    // ── legend ─────────────────────────────────────────────────────────
+    TLegend* leg = new TLegend(0.55, 0.74, 0.93, 0.93);
     leg->SetBorderSize(0);
-    leg->AddEntry(g,    "^{238}U  W_{0}/W_{90}", "lp");
-    leg->AddEntry(line, "Isotropic (=1)",         "l");
+    leg->SetFillStyle(0);
+    leg->SetTextFont(43);
+    leg->SetTextSize(20);
+    leg->AddEntry(g,    "^{238}U(n,f)  W(0^{#circ})/W(90^{#circ})", "lp");
+    leg->AddEntry(line, "Isotropic",                                  "l");
+    leg->AddEntry(band, "#pm5% band",                                 "f");
     leg->Draw();
 
+    c->RedrawAxis();
     c->SaveAs(outname.c_str());
 }

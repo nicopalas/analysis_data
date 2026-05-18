@@ -21,7 +21,9 @@ static void fillHistograms(
     const AnalysisConfig& cfg,
     std::vector<TH1D*>& hists_tof,
     Vec3D& counts_roi,
-    Vec3D& counts_bkg )
+    Vec3D& counts_bkg,
+    double emin,
+    double emax )
     {
         int nbins = (int) cfg.energy_bins.size()-1;
 
@@ -41,6 +43,7 @@ static void fillHistograms(
         
         for (Long64_t i = 0; i<nentries; i++){
             tree->GetEntry(i);
+            if (neutron_energy<emin || neutron_energy>emax) continue;
             int e_bin = findBin (cfg.energy_bins, neutron_energy);
             if(e_bin<0 || e_bin>=nbins) continue;
             if (neutron_energy>1000) continue;

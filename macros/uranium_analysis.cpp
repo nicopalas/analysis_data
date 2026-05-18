@@ -13,6 +13,9 @@
 
 void uranium_analysis(){
 
+    const double emin = 1.5;
+    const double emax = 1000;
+
     const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/U-238/output/";
 
     // ================================================================
@@ -47,7 +50,7 @@ void uranium_analysis(){
     Vec3D counts_roi_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Vec3D counts_bkg_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff);
+    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff, emin, emax);
     fin->Close();
 
     for(int i = 0; i < nbins_eff; ++i)
@@ -155,7 +158,7 @@ void uranium_analysis(){
     Vec3D counts_roi_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Vec3D counts_bkg_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree2, cfg_aniso, hists_tof_aniso, counts_roi_aniso, counts_bkg_aniso);
+    fillHistograms(tree2, cfg_aniso, hists_tof_aniso, counts_roi_aniso, counts_bkg_aniso, emin, emax);
     fin2->Close();
 
     // --- fit background ---

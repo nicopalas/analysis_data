@@ -19,6 +19,8 @@ void gold_analysis()
     // ================================================================
     // EFFICIENCY — coarse binning
     // ================================================================
+    const double emin = 120.;
+    const double emax = 1000.;
     const std::vector<double> energy_bins_eff = {120, 300, 600, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
@@ -51,7 +53,7 @@ void gold_analysis()
     Vec3D counts_bkg_eff(nbins_eff,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff);
+    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff, emin, emax);
     fin->Close();
 
     for(int i = 0; i < nbins_eff; ++i)

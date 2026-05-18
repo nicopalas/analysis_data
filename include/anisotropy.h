@@ -52,7 +52,7 @@ static AnisotropyResult anisotropy (
         std::vector<double> eps_b(nbins_det,0.0);
         std::vector<double> counts_theta_toy(nbins_beam, 0.0);
         for (int j = 0; j<nbins_det;j++){
-            if (eps[j]==0) continue; // same fluctuation in efficiency for every beam bin for a given det (ratio is correlated)
+            if (eps[j]==0) continue; // same fluctuation in efficiency for every beam bin for a given det (preserves correlation)
             eps_b[j] = rng.Gaus(eps[j],u_eps[j]);
             while (eps_b[j]<=0) eps_b[j]= rng.Gaus(eps[j],u_eps[j]);
         }

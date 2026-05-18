@@ -44,7 +44,7 @@ static std::vector<double> buildLogBins(int nbins, double e_min, double e_max){
     double log_min = std::log10(e_min);
     double log_max = std::log10(e_max);
     for(int i = 0; i <= nbins; ++i){
-        double log_e = log_min + (log_max - log_min) * std::pow(i / double(nbins), 1.2);
+        double log_e = log_min + (log_max - log_min) * std::pow(i / double(nbins), 0.7);
         bins.push_back(std::pow(10.0, log_e));
     }
     return bins;

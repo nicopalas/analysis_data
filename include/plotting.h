@@ -88,7 +88,7 @@ static void plotAnisotropy(
     leg->SetBorderSize(0);
 
     for(int e = 0; e < nbins; ++e){
-        if (e%10 == 0){
+        if (e%2 == 0){
         std::vector<double> x(nbins_beam), y(nbins_beam), ex(nbins_beam, 0.0);
         for(int i = 0; i < nbins_beam; ++i){
             x[i] = (i + 0.5) * dcos_beam;

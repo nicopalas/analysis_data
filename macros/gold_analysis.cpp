@@ -14,14 +14,14 @@
 
 void gold_analysis()
 {
-    const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/U-238/output/";
+    const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/";
 
     // ================================================================
     // EFFICIENCY — coarse binning
     // ================================================================
-    const double emin = 120.;
+    const double emin = 100.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins_eff = {120, 300, 600, 1000};
+    const std::vector<double> energy_bins_eff = {100, 300, 600, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeGoldConfig(energy_bins_eff, "eff");
@@ -44,7 +44,7 @@ void gold_analysis()
     std::vector<TH1D*> hists_tof_eff(nbins_eff, nullptr);
     for(int i = 0; i < nbins_eff; ++i){
         hists_tof_eff[i] = new TH1D(
-            Form("htof_gold_eff_%d", i), "", 100, -30, 30);
+            Form("htof_gold_eff_%d", i), "", 100, -20, 20);
         hists_tof_eff[i]->SetDirectory(0);
     }
 
@@ -52,8 +52,12 @@ void gold_analysis()
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Vec3D counts_bkg_eff(nbins_eff,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_upeak_eff(nbins_eff,                                  // NEW
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff, emin, emax);
+    fillHistograms(tree, cfg_eff, hists_tof_eff,
+                   counts_roi_eff, counts_bkg_eff, counts_upeak_eff,  // NEW
+                   emin, emax);
     fin->Close();
 
     for(int i = 0; i < nbins_eff; ++i)
@@ -75,19 +79,25 @@ void gold_analysis()
         }
     }
 
-    // --- signal ---
+    // declara aquí, antes de computeSignal
     Vec3D counts_signal_eff(nbins_eff,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Vec3D u_counts_signal_eff(nbins_eff,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    std::vector<double> cs_eff(nbins_eff), u_cs_eff(nbins_eff);
+    std::vector<double> cs_bkg_eff(nbins_eff),    u_cs_bkg_eff(nbins_eff);
+    std::vector<double> cs_upeak_eff(nbins_eff),   u_cs_upeak_eff(nbins_eff);
     for(int i = 0; i < nbins_eff; ++i){
-        cs_eff[i]   = bfs_eff[i].counts_subtract;
-        u_cs_eff[i] = bfs_eff[i].u_counts_subtract;
+        cs_bkg_eff[i]     = bfs_eff[i].counts_subtract_bkg;
+        u_cs_bkg_eff[i]   = bfs_eff[i].u_counts_subtract_bkg;
+        cs_upeak_eff[i]   = bfs_eff[i].counts_subtract_upeak;
+        u_cs_upeak_eff[i] = bfs_eff[i].u_counts_subtract_upeak;
     }
-    computeSignal(cfg_eff, counts_roi_eff, counts_bkg_eff,
-                  cs_eff, u_cs_eff,
+
+    computeSignal(cfg_eff,
+                  counts_roi_eff, counts_bkg_eff, counts_upeak_eff,
+                  cs_bkg_eff,   u_cs_bkg_eff,
+                  cs_upeak_eff, u_cs_upeak_eff,
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
@@ -142,7 +152,7 @@ void gold_analysis()
     // ANISOTROPY — 6 bins log entre 150 y 300 MeV
     // ================================================================
     const int nbins_aniso = 6;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 150.0, 1000.0);
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 100.0, 1000.0);
 
     AnalysisConfig cfg_aniso = makeGoldConfig(energy_bins_aniso, "aniso");
 
@@ -167,9 +177,12 @@ void gold_analysis()
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Vec3D counts_bkg_aniso(nbins_aniso,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_upeak_aniso(nbins_aniso,                              // NEW
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
     fillHistograms(tree2, cfg_aniso, hists_tof_aniso,
-                   counts_roi_aniso, counts_bkg_aniso);
+                   counts_roi_aniso, counts_bkg_aniso, counts_upeak_aniso,  // NEW
+                   emin, emax);
     fin2->Close();
 
     // --- fit background ---
@@ -193,14 +206,20 @@ void gold_analysis()
     Vec3D u_counts_signal_aniso(nbins_aniso,
         Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    std::vector<double> cs_aniso(nbins_aniso), u_cs_aniso(nbins_aniso);
+    // --- signal aniso ---
+    std::vector<double> cs_bkg_aniso(nbins_aniso),   u_cs_bkg_aniso(nbins_aniso);
+    std::vector<double> cs_upeak_aniso(nbins_aniso),  u_cs_upeak_aniso(nbins_aniso);
     for(int i = 0; i < nbins_aniso; ++i){
-        cs_aniso[i]   = bfs_aniso[i].counts_subtract;
-        u_cs_aniso[i] = bfs_aniso[i].u_counts_subtract;
+        cs_bkg_aniso[i]    = bfs_aniso[i].counts_subtract_bkg;
+        u_cs_bkg_aniso[i]  = bfs_aniso[i].u_counts_subtract_bkg;
+        cs_upeak_aniso[i]  = bfs_aniso[i].counts_subtract_upeak;
+        u_cs_upeak_aniso[i]= bfs_aniso[i].u_counts_subtract_upeak;
     }
-    computeSignal(cfg_aniso, counts_roi_aniso, counts_bkg_aniso,
-                  cs_aniso, u_cs_aniso,
+    computeSignal(cfg_aniso, counts_roi_aniso, counts_bkg_aniso, counts_upeak_aniso,
+                  cs_bkg_aniso,   u_cs_bkg_aniso,
+                  cs_upeak_aniso, u_cs_upeak_aniso,
                   counts_signal_aniso, u_counts_signal_aniso);
+
 
     // --- anisotropy ---
     std::vector<AnisotropyResult> aniso(nbins_aniso);

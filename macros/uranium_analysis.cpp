@@ -10,13 +10,14 @@
 #include "../include/efficiency.h"
 #include "../include/anisotropy.h"
 #include "../include/plotting.h"
+#include "../include/cross_section.h"
 
 void uranium_analysis(){
 
-    const double emin = 1.5;
+    const double emin = 100.;
     const double emax = 1000;
 
-    const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/U-238/output/";
+    const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/";
 
     // ================================================================
     // EFFICIENCY — coarse binning
@@ -47,10 +48,16 @@ void uranium_analysis(){
         hists_tof_eff[i]->SetDirectory(0);
     }
 
-    Vec3D counts_roi_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D counts_bkg_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_roi_eff(nbins_eff,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_bkg_eff(nbins_eff,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_upeak_eff(nbins_eff,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree, cfg_eff, hists_tof_eff, counts_roi_eff, counts_bkg_eff, emin, emax);
+    fillHistograms(tree, cfg_eff, hists_tof_eff,
+                   counts_roi_eff, counts_bkg_eff, counts_upeak_eff,
+                   emin, emax);
     fin->Close();
 
     for(int i = 0; i < nbins_eff; ++i)
@@ -71,17 +78,22 @@ void uranium_analysis(){
     }
 
     // --- signal ---
-    Vec3D counts_signal_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D u_counts_signal_eff(nbins_eff, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_signal_eff(nbins_eff,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D u_counts_signal_eff(nbins_eff,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    std::vector<double> cs_eff(nbins_eff), u_cs_eff(nbins_eff);
+    std::vector<double> cs_eff(nbins_eff),            u_cs_eff(nbins_eff);
+    std::vector<double> cs_upeak_eff(nbins_eff, 0.0), u_cs_upeak_eff(nbins_eff, 0.0);
     for(int i = 0; i < nbins_eff; ++i){
-        cs_eff[i]   = bfs_eff[i].counts_subtract;
-        u_cs_eff[i] = bfs_eff[i].u_counts_subtract;
+        cs_eff[i]   = bfs_eff[i].counts_subtract_bkg;
+        u_cs_eff[i] = bfs_eff[i].u_counts_subtract_bkg;
     }
 
-    computeSignal(cfg_eff, counts_roi_eff, counts_bkg_eff,
-                  cs_eff, u_cs_eff,
+    computeSignal(cfg_eff,
+                  counts_roi_eff, counts_bkg_eff, counts_upeak_eff,
+                  cs_eff,         u_cs_eff,
+                  cs_upeak_eff,   u_cs_upeak_eff,
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
@@ -102,7 +114,8 @@ void uranium_analysis(){
             e);
 
     // --- save efficiency ---
-    TFile* fout_eff = TFile::Open((outdir + "output_efficiency_uranium.root").c_str(), "RECREATE");
+    TFile* fout_eff = TFile::Open(
+        (outdir + "output_efficiency_uranium.root").c_str(), "RECREATE");
     if(!fout_eff || fout_eff->IsZombie()){
         std::cerr << "Error creating efficiency output file\n";
         return;
@@ -134,8 +147,8 @@ void uranium_analysis(){
     // ================================================================
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
-    const int nbins_aniso = 50;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.5, 1000.0);
+    const int nbins_aniso = 30;
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 100., 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 
@@ -151,14 +164,20 @@ void uranium_analysis(){
     // --- histograms ---
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
-        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 200, -30, 30);
+        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 200, -20, 20);
         hists_tof_aniso[i]->SetDirectory(0);
     }
 
-    Vec3D counts_roi_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D counts_bkg_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_roi_aniso(nbins_aniso,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_bkg_aniso(nbins_aniso,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_upeak_aniso(nbins_aniso,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    fillHistograms(tree2, cfg_aniso, hists_tof_aniso, counts_roi_aniso, counts_bkg_aniso, emin, emax);
+    fillHistograms(tree2, cfg_aniso, hists_tof_aniso,
+                   counts_roi_aniso, counts_bkg_aniso, counts_upeak_aniso,
+                   emin, emax);
     fin2->Close();
 
     // --- fit background ---
@@ -172,17 +191,22 @@ void uranium_analysis(){
     }
 
     // --- signal ---
-    Vec3D counts_signal_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D u_counts_signal_aniso(nbins_aniso, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D counts_signal_aniso(nbins_aniso,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D u_counts_signal_aniso(nbins_aniso,
+        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-    std::vector<double> cs_aniso(nbins_aniso), u_cs_aniso(nbins_aniso);
+    std::vector<double> cs_aniso(nbins_aniso),            u_cs_aniso(nbins_aniso);
+    std::vector<double> cs_upeak_aniso(nbins_aniso, 0.0), u_cs_upeak_aniso(nbins_aniso, 0.0);
     for(int i = 0; i < nbins_aniso; ++i){
-        cs_aniso[i]   = bfs_aniso[i].counts_subtract;
-        u_cs_aniso[i] = bfs_aniso[i].u_counts_subtract;
+        cs_aniso[i]   = bfs_aniso[i].counts_subtract_bkg;
+        u_cs_aniso[i] = bfs_aniso[i].u_counts_subtract_bkg;
     }
 
-    computeSignal(cfg_aniso, counts_roi_aniso, counts_bkg_aniso,
-                  cs_aniso, u_cs_aniso,
+    computeSignal(cfg_aniso,
+                  counts_roi_aniso, counts_bkg_aniso, counts_upeak_aniso,
+                  cs_aniso,         u_cs_aniso,
+                  cs_upeak_aniso,   u_cs_upeak_aniso,
                   counts_signal_aniso, u_counts_signal_aniso);
 
     // --- anisotropy — map each fine bin to coarse efficiency bin ---
@@ -191,7 +215,7 @@ void uranium_analysis(){
         double Ec = std::sqrt(energy_bins_aniso[e] * energy_bins_aniso[e+1]);
 
         int e_eff = findBin(energy_bins_eff, Ec);
-        if(e_eff < 0)         e_eff = 0;
+        if(e_eff < 0)          e_eff = 0;
         if(e_eff >= nbins_eff) e_eff = nbins_eff - 1;
 
         aniso[e] = anisotropy(
@@ -211,56 +235,123 @@ void uranium_analysis(){
     }
 
     // --- save anisotropy ---
-    TFile* fout_aniso = TFile::Open((outdir + "output_anisotropy_uranium.root").c_str(), "RECREATE");
+    TFile* fout_aniso = TFile::Open(
+        (outdir + "output_anisotropy_uranium_complete.root").c_str(), "RECREATE");
     if(!fout_aniso || fout_aniso->IsZombie()){
         std::cerr << "Error creating anisotropy output file\n";
         return;
     }
     for(int e = 0; e < nbins_aniso; ++e){
+        TGraphErrors* g = nullptr;
 
-    TGraphErrors* g = nullptr;
-
-    if (e%10 == 0){
-
-        std::vector<double> x(nbins_beam),
-                            y(nbins_beam),
-                            ex(nbins_beam, 0.0);
-
-        for(int i = 0; i < nbins_beam; ++i){
-            x[i] = (i + 0.5) * dcos_beam;
-            y[i] = aniso[e].w[i];
+        if(e % 10 == 0){
+            std::vector<double> x(nbins_beam), y(nbins_beam), ex(nbins_beam, 0.0);
+            for(int i = 0; i < nbins_beam; ++i){
+                x[i] = (i + 0.5) * dcos_beam;
+                y[i] = aniso[e].w[i];
+            }
+            g = new TGraphErrors(
+                nbins_beam,
+                x.data(), y.data(),
+                ex.data(), aniso[e].u_w.data());
+            g->SetName(Form("anisotropy_ebin%d", e));
+            g->SetTitle(Form(
+                "W(#theta)/W(90) %.1f-%.1f MeV;"
+                "cos(#theta_{beam});W(#theta)/W(90)",
+                energy_bins_aniso[e], energy_bins_aniso[e+1]));
+            g->SetMinimum(0.8);
+            g->SetMaximum(2.5);
         }
 
-        g = new TGraphErrors(
-            nbins_beam,
-            x.data(),
-            y.data(),
-            ex.data(),
-            aniso[e].u_w.data()
-        );
-
-        g->SetName(Form("anisotropy_ebin%d", e));
-
-        g->SetTitle(Form(
-            "W(#theta)/W(90) %.1f-%.1f MeV;"
-            "cos(#theta_{beam});W(#theta)/W(90)",
-            energy_bins_aniso[e],
-            energy_bins_aniso[e+1]
-        ));
-
-        g->SetMinimum(0.8);
-        g->SetMaximum(2.5);
+        if(g) g->Write();
+        hists_tof_aniso[e]->Write();
     }
-
-    if(g) g->Write();
-
-    hists_tof_aniso[e]->Write();
-}
     fout_aniso->Close();
 
     // --- plot anisotropy ---
     plotAnisotropy(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
-                   outdir + "anisotropy_uranium.pdf");
+                   outdir + "anisotropy_uranium_complete.pdf");
     plotAnisotropyRatio(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
-                        outdir + "anisotropy_ratio_uranium.pdf");
+                        outdir + "anisotropy_ratio_uranium_complete.pdf");
+
+
+    // ================================================================
+// CROSS SECTION ABSOLUTE — fine logarithmic binning
+// ================================================================
+const int nbins_cs = nbins_aniso;
+const std::vector<double>& energy_bins_cs = energy_bins_aniso;
+
+// E_low y E_high en MeV para readFlux
+std::vector<double> E_low_cs(nbins_cs), E_high_cs(nbins_cs);
+for (int e = 0; e < nbins_cs; ++e) {
+    E_low_cs[e]  = energy_bins_cs[e];
+    E_high_cs[e] = energy_bins_cs[e+1];
+}
+
+// reutilizamos counts_signal_aniso, u_counts_signal_aniso y eff ya calculados
+std::vector<CrossSection> cs_abs(nbins_cs);
+for (int e = 0; e < nbins_cs; ++e) {
+
+    double Ec   = std::sqrt(energy_bins_cs[e] * energy_bins_cs[e+1]);
+    int e_eff   = findBin(energy_bins_eff, Ec);
+    if (e_eff < 0)          e_eff = 0;
+    if (e_eff >= nbins_eff) e_eff = nbins_eff - 1;
+
+    cs_abs[e] = cross_section_absolute(
+        cfg_aniso.flux_file,     
+        cfg_aniso.flux_hist,  
+        nbins_beam,
+        nbins_det,
+        counts_signal_aniso,
+        u_counts_signal_aniso,
+        eff[e_eff].eps,
+        eff[e_eff].u_eps,
+        dOmega_eff,
+        e,
+        E_low_cs,
+        E_high_cs,
+        cfg_aniso.atoms,                
+        cfg_aniso);
+
+    std::cout << "CS_abs ebin " << e
+              << "  E=" << Ec << " MeV"
+              << "  sigma=" << cs_abs[e].sigma
+              << " +/- "    << cs_abs[e].u_sigma << " barn\n";
+}
+
+// --- save cross section ---
+TFile* fout_cs = TFile::Open(
+    (outdir + "output_cross_section_uranium.root").c_str(), "RECREATE");
+if (!fout_cs || fout_cs->IsZombie()) {
+    std::cerr << "Error creating cross section output file\n";
+    return;
+}
+
+// TGraphErrors con sigma vs energia
+std::vector<double> x_cs, y_cs, ex_cs, ey_cs;
+for (int e = 0; e < nbins_cs; ++e) {
+    if (cs_abs[e].sigma <= 0.0) continue;
+    double Ec = std::sqrt(energy_bins_cs[e] * energy_bins_cs[e+1]);
+    x_cs.push_back(Ec);
+    y_cs.push_back(cs_abs[e].sigma);
+    ex_cs.push_back((E_high_cs[e] - E_low_cs[e]) / 2.0);
+    ey_cs.push_back(cs_abs[e].u_sigma);
+}
+
+TGraphErrors* g_cs = new TGraphErrors(
+    (int)x_cs.size(),
+    x_cs.data(), y_cs.data(),
+    ex_cs.data(), ey_cs.data());
+g_cs->SetName("g_sigma_abs_U238");
+g_cs->SetTitle("#sigma_{abs}(U-238);E_{n} (MeV);#sigma (barn)");
+g_cs->SetMarkerStyle(20);
+g_cs->SetMarkerColor(kRed+1);
+g_cs->SetLineColor(kRed+1);
+g_cs->SetLineWidth(2);
+g_cs->Write();
+
+fout_cs->Close();
+
+    for(int i = 0; i < nbins_eff;   ++i) delete hists_tof_eff[i];
+    for(int i = 0; i < nbins_aniso; ++i) delete hists_tof_aniso[i];
 }

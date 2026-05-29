@@ -21,7 +21,7 @@ void gold_analysis()
     // ================================================================
     const double emin = 100.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins_eff = {100, 300, 600, 1000};
+    const std::vector<double> energy_bins_eff = {80, 300, 600, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeGoldConfig(energy_bins_eff, "eff");
@@ -151,7 +151,7 @@ void gold_analysis()
     // ================================================================
     // ANISOTROPY — 6 bins log entre 150 y 300 MeV
     // ================================================================
-    const int nbins_aniso = 6;
+    const int nbins_aniso = 7;
     std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 100.0, 1000.0);
 
     AnalysisConfig cfg_aniso = makeGoldConfig(energy_bins_aniso, "aniso");

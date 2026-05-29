@@ -8,25 +8,30 @@
 #include <string>
 #include <cmath>
 
-struct BackgroundFit {
-    double counts_subtract  = 0.0;
-    double u_counts_subtract = 0.0;
-    double chi2ndf           = 0.0;
-    TF1*   func             = nullptr;
-    TH1D*  hist_subtracted  = nullptr;
-}; 
 
-// -------------------------------------------------------
-// background model depends on sample and energy
-// uranium: simple linear (one peak, flat background)
-// gold:    two gaussians + polynomial (U peak + Au peak + continuum)
-// -------------------------------------------------------
+
+struct BackgroundFit {
+    double counts_subtract        = 0.0;
+    double u_counts_subtract      = 0.0;
+    double counts_subtract_bkg    = 0.0;
+    double u_counts_subtract_bkg  = 0.0;
+    double counts_subtract_upeak  = 0.0;
+    double u_counts_subtract_upeak= 0.0;
+    double chi2ndf                = 0.0;
+    TF1*   func                   = nullptr;  // conservado para compatibilidad
+    TH1D*  hist_subtracted        = nullptr;
+    // nuevo: resultado RooFit
+    RooFitResult* roo_result      = nullptr;
+    double n_sig_val              = 0.0;
+    double n_sig_err              = 0.0;
+};
+
 static std::string getBackgroundFormula(Sample sample){
     switch(sample){
         case Sample::uranium: return "[0]+[1]*x";
         case Sample::gold:    return "[0]+[1]*x+[2]*x*x"
-                                     " + [3]*TMath::Gaus(x,[4],[5],1)"
-                                     " + [6]*TMath::Gaus(x,[7],[8],1)";
+                                     "+[3]*TMath::Gaus(x,[4],[5],1)"
+                                     "+[6]*TMath::Gaus(x,[7],[8],1)";
     }
     return "[0]+[1]*x";
 }
@@ -40,12 +45,12 @@ static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
             f->SetParLimits(0,  0.0,  1e6);
             f->SetParLimits(1, -5.0,  5.0);
             f->SetParLimits(2, -1.0,  1.0);
-            f->SetParLimits(3,  0.0,  1e6);  // A_U
-            f->SetParLimits(4, -15.0, -5.0); // mu_U
-            f->SetParLimits(5,  0.5,  4.0);  // sigma_U
-            f->SetParLimits(6,  0.0,  1e6);  // A_Au
-            f->SetParLimits(7, -2.0,  2.0);  // mu_Au
-            f->SetParLimits(8,  0.5,  4.0);  // sigma_Au
+            f->SetParLimits(3,  0.0,  1e6);
+            f->SetParLimits(4, -15.0, -5.0);
+            f->SetParLimits(5,  0.5,  4.0);
+            f->SetParLimits(6,  0.0,  1e6);
+            f->SetParLimits(7, -2.0,  2.0);
+            f->SetParLimits(8,  0.5,  4.0);
             f->SetParameters(
                 1.0, 0.0, 1e-3,
                 std::max(1.0, h->GetBinContent(h->FindBin(-10.0))), -10.0, 1.5,
@@ -55,6 +60,28 @@ static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
     }
 }
 
+// decompose gold fit into continuum and uranium peak integrals
+static void decomposeGoldIntegrals(
+    TF1* f,
+    double roi_min, double roi_max,
+    double& counts_bkg,   double& u_counts_bkg,
+    double& counts_upeak, double& u_counts_upeak)
+{
+    // continuum: polynomial only [0]+[1]*x+[2]*x*x
+    TF1 f_poly("f_poly_decomp", "[0]+[1]*x+[2]*x*x", roi_min, roi_max);
+    f_poly.SetParameters(f->GetParameter(0),
+                         f->GetParameter(1),
+                         f->GetParameter(2));
+    counts_bkg = f_poly.Integral(roi_min, roi_max);
+
+    // uranium peak: first gaussian [3]*Gaus(x,[4],[5],1)
+    TF1 f_upeak("f_upeak_decomp", "[0]*TMath::Gaus(x,[1],[2],1)", roi_min, roi_max);
+    f_upeak.SetParameters(f->GetParameter(3),
+                          f->GetParameter(4),
+                          f->GetParameter(5));
+    counts_upeak = f_upeak.Integral(roi_min, roi_max);
+}
+
 static BackgroundFit fitBackground(
     const AnalysisConfig& cfg,
     TH1D* h,
@@ -62,20 +89,19 @@ static BackgroundFit fitBackground(
     double roi_max,
     int ebin)
 {
-    BackgroundFit result;  
+    BackgroundFit result;
     int    ntot = h->GetNbinsX();
-    double xmin = h->GetBinCenter(1);      
+    double xmin = h->GetBinCenter(1);
     double xmax = h->GetBinCenter(ntot);
 
-    // --- build and fit background model ---
     std::string formula = getBackgroundFormula(cfg.sample);
     TF1* f = new TF1(Form("bkg_%s_%d", cfg.output_tag.c_str(), ebin),
                      formula.c_str(), xmin, xmax);
     setBackgroundParameters(f, cfg.sample, h);
 
     TH1D* h_tails = (TH1D*)h->Clone(Form("h_tails_%s_%d", cfg.output_tag.c_str(), ebin));
-    for(int b = 1; b <= ntot; ++b){                
-        double x = h_tails->GetBinCenter(b);    
+    for(int b = 1; b <= ntot; ++b){
+        double x = h_tails->GetBinCenter(b);
         if(x > roi_min && x < roi_max){
             h_tails->SetBinContent(b, 0);
             h_tails->SetBinError(b, 1e10);
@@ -83,6 +109,8 @@ static BackgroundFit fitBackground(
     }
     h_tails->Fit(f, "IRS", "", xmin, xmax);
     delete h_tails;
+
+    // chi2
     double chi2 = 0.0;
     int    ndf  = 0;
     for(int b = 1; b <= ntot; ++b){
@@ -90,21 +118,33 @@ static BackgroundFit fitBackground(
         double obs = h->GetBinContent(b);
         double err = h->GetBinError(b);
         if(err <= 0) continue;
-        if(x > roi_min && x < roi_max) continue;  // skip signal region
+        if(x > roi_min && x < roi_max) continue;
         chi2 += std::pow((obs - f->Eval(x)) / err, 2);
         ndf++;
     }
-    ndf -= f->GetNpar();
+    ndf -= f->GetNumberFreeParameters();
     result.chi2ndf = (ndf > 0) ? chi2 / ndf : 0.0;
 
-    // --- nominal background integral ---
+    // total nominal integral
     result.counts_subtract = f->Integral(roi_min, roi_max);
 
-    // --- bootstrap ---
+    // decompose for gold
+    if(cfg.sample == Sample::gold){
+        decomposeGoldIntegrals(f, roi_min, roi_max,
+            result.counts_subtract_bkg,   result.u_counts_subtract_bkg,
+            result.counts_subtract_upeak, result.u_counts_subtract_upeak);
+    } else {
+        result.counts_subtract_bkg   = result.counts_subtract;
+        result.u_counts_subtract_bkg = 0.0;  // filled by bootstrap below
+    }
+
+    // bootstrap
     int ntoys = cfg.n_toys;
     std::vector<double> toy_sub(ntot, 0.0);
     std::vector<double> toy_sub2(ntot, 0.0);
     std::vector<double> toy_integrals(ntoys, 0.0);
+    std::vector<double> toy_integrals_bkg(ntoys, 0.0);
+    std::vector<double> toy_integrals_upeak(ntoys, 0.0);
 
     TRandom3 rng(42 + ebin);
 
@@ -112,7 +152,7 @@ static BackgroundFit fitBackground(
         TH1D* h_toy = (TH1D*)h->Clone(Form("h_toy_tmp_%d", itoy));
         for(int b = 1; b <= ntot; ++b){
             double fluct = rng.Poisson(h->GetBinContent(b));
-            h_toy->SetBinContent(b, fluct);            
+            h_toy->SetBinContent(b, fluct);
             h_toy->SetBinError(b, fluct > 0 ? std::sqrt(fluct) : 1.0);
         }
 
@@ -128,48 +168,60 @@ static BackgroundFit fitBackground(
         TF1* f_toy = new TF1(Form("f_toy_tmp_%d", itoy),
                              formula.c_str(), xmin, xmax);
         setBackgroundParameters(f_toy, cfg.sample, h_toy);
-        // warm start from nominal fit
         for(int p = 0; p < f->GetNpar(); ++p)
             f_toy->SetParameter(p, f->GetParameter(p));
 
         h_toy_tails->Fit(f_toy, "IRS Q", "", xmin, xmax);
         delete h_toy_tails;
 
-        // integral of background in ROI for this toy
-        toy_integrals[itoy] = f_toy->Integral(roi_min, roi_max); 
+        toy_integrals[itoy] = f_toy->Integral(roi_min, roi_max);
 
-        // bin-by-bin subtracted signal
+        if(cfg.sample == Sample::gold){
+            double cb, ucb, cup, ucup;
+            decomposeGoldIntegrals(f_toy, roi_min, roi_max, cb, ucb, cup, ucup);
+            toy_integrals_bkg[itoy]   = cb;
+            toy_integrals_upeak[itoy] = cup;
+        } else {
+            toy_integrals_bkg[itoy] = toy_integrals[itoy];
+        }
+
         for(int b = 1; b <= ntot; ++b){
-            double x       = h_toy->GetBinCenter(b);
-            double sub     = h_toy->GetBinContent(b) - f_toy->Eval(x);  
+            double x   = h_toy->GetBinCenter(b);
+            double sub = h_toy->GetBinContent(b) - f_toy->Eval(x);
             toy_sub[b-1]  += sub;
-            toy_sub2[b-1] += sub * sub; 
+            toy_sub2[b-1] += sub * sub;
         }
 
         delete h_toy;
         delete f_toy;
     }
 
-    // --- uncertainty from std of toy integrals ---
-    double mean_int = 0.0;
-    for(double v : toy_integrals) mean_int += v;
-    mean_int /= ntoys;
+    // uncertainty from bootstrap std
+    auto bootstrap_std = [&](const std::vector<double>& vals) -> double {
+        double mean = 0.0;
+        for(double v : vals) mean += v;
+        mean /= ntoys;
+        double var = 0.0;
+        for(double v : vals) var += (v - mean) * (v - mean);
+        return std::sqrt(var / (ntoys - 1));
+    };
 
-    double var_int = 0.0;
-    for(double v : toy_integrals) var_int += (v - mean_int) * (v - mean_int);
-    result.u_counts_subtract = std::sqrt(var_int / (ntoys - 1)); 
+    result.u_counts_subtract     = bootstrap_std(toy_integrals);
+    result.u_counts_subtract_bkg = bootstrap_std(toy_integrals_bkg);
+    if(cfg.sample == Sample::gold)
+        result.u_counts_subtract_upeak = bootstrap_std(toy_integrals_upeak);
 
-    // --- subtracted histogram ---
+    // subtracted histogram
     result.hist_subtracted = (TH1D*)h->Clone(
         Form("hclone_%s_%d", cfg.output_tag.c_str(), ebin));
-
     for(int b = 0; b < ntot; ++b){
-        double mean_s = toy_sub[b]  / ntoys; 
+        double mean_s = toy_sub[b]  / ntoys;
         double var    = toy_sub2[b] / ntoys - mean_s * mean_s;
         result.hist_subtracted->SetBinContent(b+1, mean_s);
         result.hist_subtracted->SetBinError(b+1, var > 0 ? std::sqrt(var) : 0.0);
     }
 
     result.func = f;
-    return result; 
+    return result;
 }
+

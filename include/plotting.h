@@ -39,7 +39,21 @@ static void plotEfficiency(
     double centers[10];
     for(int i = 0; i < nbins_det; ++i) centers[i] = (i + 0.5) * (1.0/nbins_det);
 
-    int colors[] = {kOrange, kSpring+5, kAzure+3, kMagenta+2};
+    int colors[] = {
+    kBlack,
+    kRed+1,
+    kAzure+1,
+    kGreen+2,
+    kViolet+1,
+};
+    int markers[] = {20, 21, 22, 23, 33};
+    gStyle->SetOptStat(0);
+    gStyle->SetFrameLineWidth(2);
+    gStyle->SetPadTickX(1);   // ticks en los 4 lados
+    gStyle->SetPadTickY(1);
+    gStyle->SetLegendFont(42);
+    gStyle->SetTitleFont(42, "XY");
+    gStyle->SetLabelFont(42, "XY");
 
     TCanvas* c = new TCanvas("c_eff", "Efficiency", 900, 700);
     gStyle->SetOptStat(0);
@@ -51,9 +65,10 @@ static void plotEfficiency(
     for(int e = 0; e < nbins; ++e){
         TGraphErrors* gr = new TGraphErrors(
             nbins_det, centers, eff[e].eps.data(), nullptr, eff[e].u_eps.data());
-        gr->SetMarkerStyle(21);
+        gr->SetMarkerStyle(markers[e]);
         gr->SetMarkerColor(colors[e]);
         gr->SetLineColor(colors[e]);
+        gr->SetMarkerSize(1.2);
         gr->SetLineWidth(2);
 
         if(e == 0){

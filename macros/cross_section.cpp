@@ -19,16 +19,16 @@
 
 void cross_section() {
 
-    const std::string outdir           = "/Users/nico/Desktop/Tese/Analysis/U-238/output/";
-    const std::string eff_file_uranium = "/Users/nico/Desktop/Tese/Analysis/U-238/output/output_efficiency_uranium.root";
-    const std::string eff_file_gold    = "/Users/nico/Desktop/Tese/Analysis/U-238/output/output_efficiency_gold.root";
+    const std::string outdir           = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/";
+    const std::string eff_file_uranium = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/output_efficiency_uranium.root";
+    const std::string eff_file_gold    = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/output_efficiency_gold.root";
 
     // ================================================================
-    // CONFIGS — each carries its own energy_bins_eff
+    // CONFIGS
     // ================================================================
-    const double emin = 150.;
+    const double emin = 100.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins = buildLogBins(8, emin, emax);
+    const std::vector<double> energy_bins = buildLogBins(6, emin, emax);
     const int nbins = (int)energy_bins.size() - 1;
 
     AnalysisConfig cfg_u = makeUraniumConfig(energy_bins, "xs");
@@ -77,7 +77,7 @@ void cross_section() {
     Vec2D dOmega = rebin(dOmega_fine);
 
     // ================================================================
-    // PIPELINE — fill histograms, fit background, compute signal
+    // PIPELINE
     // ================================================================
     auto run_pipeline = [&](
         AnalysisConfig& cfg,
@@ -107,13 +107,21 @@ void cross_section() {
             hists_tof[i]->SetDirectory(0);
         }
 
-        Vec3D counts_roi(nb, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-        Vec3D counts_bkg(nb, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+        Vec3D counts_roi(nb,
+            Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+        Vec3D counts_bkg(nb,
+            Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+        Vec3D counts_upeak(nb,
+            Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
-        fillHistograms(tree, cfg, hists_tof, counts_roi, counts_bkg, emin, emax );
+        fillHistograms(tree, cfg, hists_tof,
+                       counts_roi, counts_bkg, counts_upeak,
+                       emin, emax);
         fin->Close();
 
-        std::vector<double> cs(nb, 0.0), u_cs(nb, 0.0);
+        std::vector<double> cs_bkg(nb, 0.0),   u_cs_bkg(nb, 0.0);
+        std::vector<double> cs_upeak(nb, 0.0), u_cs_upeak(nb, 0.0);
+
         for (int i = 0; i < nb; ++i) {
             double Ec = std::sqrt(cfg.energy_bins[i] * cfg.energy_bins[i+1]);
             EventCuts c = getCuts(cfg.sample, Ec);
@@ -122,14 +130,24 @@ void cross_section() {
                 std::cerr << "Fit failed ebin " << i << "\n";
                 continue;
             }
-            cs[i]   = bf.counts_subtract;
-            u_cs[i] = bf.u_counts_subtract;
+            cs_bkg[i]    = bf.counts_subtract_bkg;
+            u_cs_bkg[i]  = bf.u_counts_subtract_bkg;
+            cs_upeak[i]  = bf.counts_subtract_upeak;
+            u_cs_upeak[i]= bf.u_counts_subtract_upeak;
         }
 
-        counts_signal.assign(nb, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-        u_counts_signal.assign(nb, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-        computeSignal(cfg, counts_roi, counts_bkg, cs, u_cs,
+        counts_signal.assign(nb,
+            Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+        u_counts_signal.assign(nb,
+            Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+
+        computeSignal(cfg,
+                      counts_roi, counts_bkg, counts_upeak,
+                      cs_bkg,    u_cs_bkg,
+                      cs_upeak,  u_cs_upeak,
                       counts_signal, u_counts_signal);
+
+        for (int i = 0; i < nb; ++i) delete hists_tof[i];
     };
 
     Vec3D counts_signal_uranium, u_counts_signal_uranium;
@@ -152,12 +170,12 @@ void cross_section() {
         double Ec = energy[e];
 
         int e_eff_u = findBin(cfg_u.energy_bins_eff, Ec);
-        if (e_eff_u < 0)             e_eff_u = 0;
-        if (e_eff_u >= nbins_eff_u)  e_eff_u = nbins_eff_u - 1;
+        if (e_eff_u < 0)            e_eff_u = 0;
+        if (e_eff_u >= nbins_eff_u) e_eff_u = nbins_eff_u - 1;
 
         int e_eff_g = findBin(cfg_g.energy_bins_eff, Ec);
-        if (e_eff_g < 0)             e_eff_g = 0;
-        if (e_eff_g >= nbins_eff_g)  e_eff_g = nbins_eff_g - 1;
+        if (e_eff_g < 0)            e_eff_g = 0;
+        if (e_eff_g >= nbins_eff_g) e_eff_g = nbins_eff_g - 1;
 
         CrossSection xs = cross_section_ratio(
             nbins_beam, nbins_det,
@@ -175,6 +193,53 @@ void cross_section() {
                   << "  e_eff_u=" << e_eff_u << "  e_eff_g=" << e_eff_g
                   << "  Au/U=" << ratio[e] << " +/- " << u_ratio[e] << "\n";
     }
+
+    // ================================================================
+    // CROSS SECTION ABSOLUTE
+    // ================================================================
+    std::vector<double> sigma_u(nbins, 0.0),    u_sigma_u(nbins, 0.0);
+    std::vector<double> sigma_au(nbins, 0.0),   u_sigma_au(nbins, 0.0);
+
+    for (int e = 0; e < nbins; ++e) {
+        double Ec = energy[e];
+
+        int e_eff_u = findBin(cfg_u.energy_bins_eff, Ec);
+        if (e_eff_u < 0)            e_eff_u = 0;
+        if (e_eff_u >= nbins_eff_u) e_eff_u = nbins_eff_u - 1;
+
+        int e_eff_g = findBin(cfg_g.energy_bins_eff, Ec);
+        if (e_eff_g < 0)            e_eff_g = 0;
+        if (e_eff_g >= nbins_eff_g) e_eff_g = nbins_eff_g - 1;
+
+        CrossSection xs_u = cross_section_absolute(
+            cfg_u.flux_file, cfg_u.flux_hist,
+            nbins_beam, nbins_det,
+            counts_signal_uranium, u_counts_signal_uranium,
+            eff_uranium[e_eff_u].eps, eff_uranium[e_eff_u].u_eps,
+            dOmega, e, E_low, E_high,
+            cfg_u.atoms, cfg_u);
+
+        CrossSection xs_g = cross_section_absolute(
+            cfg_g.flux_file, cfg_g.flux_hist,
+            nbins_beam, nbins_det,
+            counts_signal_gold, u_counts_signal_gold,
+            eff_gold[e_eff_g].eps, eff_gold[e_eff_g].u_eps,
+            dOmega, e, E_low, E_high,
+            cfg_g.atoms, cfg_g);
+
+        sigma_u[e]   = xs_u.sigma;
+        u_sigma_u[e] = xs_u.u_sigma;
+        sigma_au[e]  = xs_g.sigma;
+        u_sigma_au[e]= xs_g.u_sigma;
+
+        std::cout << "Abs XS ebin " << e
+                  << "  E=" << Ec << " MeV"
+                  << "  sigma_U="  << sigma_u[e]  << " +/- " << u_sigma_u[e]
+                  << "  sigma_Au=" << sigma_au[e] << " +/- " << u_sigma_au[e]
+                  << " barn\n";
+    }
+
+
 
     // ================================================================
     // SAVE AND PLOT
@@ -200,12 +265,58 @@ void cross_section() {
     c1->SetLogx();
     g_ratio->Draw("AP");
 
-    TFile* fout = TFile::Open((outdir + "cross_section_ratio.root").c_str(), "RECREATE");
+    TFile* fout = TFile::Open(
+        (outdir + "cross_section_ratio.root").c_str(), "RECREATE");
     if (!fout || fout->IsZombie()) {
         std::cerr << "Error creating output file\n";
         return;
     }
     g_ratio->Write();
     c1->Write();
+
+    // graphs absolutos
+    auto makeAbsGraph = [&](const std::vector<double>& sig,
+                             const std::vector<double>& u_sig,
+                             const char* name, const char* title,
+                             int color) -> TGraphErrors*
+    {
+        std::vector<double> gx, gy, gex, gey;
+        for (int e = 0; e < nbins; ++e) {
+            if (sig[e] <= 0.0) continue;
+            gx.push_back(energy[e]);
+            gy.push_back(sig[e]);
+            gex.push_back(0.0);
+            gey.push_back(u_sig[e]);
+        }
+        TGraphErrors* g = new TGraphErrors(
+            (int)gx.size(), gx.data(), gy.data(), gex.data(), gey.data());
+        g->SetName(name);
+        g->SetTitle(title);
+        g->SetMarkerStyle(20);
+        g->SetMarkerColor(color);
+        g->SetLineColor(color);
+        g->SetLineWidth(2);
+        return g;
+    };
+
+    TGraphErrors* g_abs_u  = makeAbsGraph(sigma_u,  u_sigma_u,
+        "g_sigma_abs_U238",  "#sigma_{abs}(U-238);E (MeV);#sigma (barn)",  kRed+1);
+    TGraphErrors* g_abs_au = makeAbsGraph(sigma_au, u_sigma_au,
+        "g_sigma_abs_Au197", "#sigma_{abs}(Au-197);E (MeV);#sigma (barn)", kBlue+1);
+
+    TCanvas* c_abs = new TCanvas("c_abs", "Absolute cross sections", 800, 600);
+    c_abs->SetLogx();
+    c_abs->SetLogy();
+    g_abs_au->Draw("AP");
+    g_abs_u->Draw("P SAME");
+    TLegend* leg_abs = new TLegend(0.6, 0.7, 0.88, 0.85);
+    leg_abs->AddEntry(g_abs_au, "Au-197", "lp");
+    leg_abs->AddEntry(g_abs_u,  "U-238",  "lp");
+    leg_abs->Draw();
+    g_ratio->Write();
+    g_abs_u->Write();
+    g_abs_au->Write();
+    c1->Write();
+    c_abs->Write();
     fout->Close();
 }

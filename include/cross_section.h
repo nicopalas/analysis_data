@@ -35,7 +35,7 @@ static CrossSection cross_section_ratio(
     for (int j = 0; j < nbins_beam; j++) {
         for (int ii = 0; ii < nbins_det; ii++) {
             double dO = dOmega[j][ii];
-            if (dO <= 0.0) continue;
+            if (dO <= 0.0 || j*dcos_det<cfg.cos_det_cut) continue;
 
             double eg = eps_gold[ii];
             double eu = eps_uranium[ii];
@@ -91,13 +91,188 @@ static CrossSection cross_section_ratio(
         bootstrap_ratios[b] = bs_gold / bs_uranium;
     }
 
-    // --- std del bootstrap como incertidumbre ---
+    // bootstrapping-
     double mean = 0.0;
     for (double v : bootstrap_ratios) mean += v;
     mean /= n_bootstrap;
 
     double var = 0.0;
     for (double v : bootstrap_ratios) var += (v - mean) * (v - mean);
+    result.u_sigma = std::sqrt(var / (n_bootstrap - 1));
+
+    return result;
+}
+
+bool readFlux(const std::string& fname,
+              const std::string& hname,
+              int nbins,
+              const std::vector<double>& E_low,
+              const std::vector<double>& E_high,
+              std::vector<double>& flux,
+              std::vector<double>& u_flux)
+{
+    flux.assign(nbins, 0.0);
+    u_flux.assign(nbins, 0.0);
+
+    TFile *f = TFile::Open(fname.c_str(), "READ");
+    if (!f || f->IsZombie()) {
+        std::cerr << "[ERROR] Cannot open flux file " << fname << "\n";
+        return false;
+    }
+
+    TH1D *h = (TH1D*) f->Get(hname.c_str());
+    if (!h) {
+        std::cerr << "[ERROR] Cannot find hist '" << hname
+                  << "' in " << fname << "\n";
+        f->Close();
+        return false;
+    }
+
+    h = (TH1D*) h->Clone("h_flux_clone");
+    h->SetDirectory(nullptr);
+    f->Close();
+
+    std::cout << "[DEBUG] h_Flux: NbinsX=" << h->GetNbinsX()
+              << "  Xmin=" << h->GetXaxis()->GetXmin()
+              << "  Xmax=" << h->GetXaxis()->GetXmax()
+              << "\n";
+    std::cout << "[DEBUG] E_low[0]=" << E_low[0]
+              << "  E_high[0]=" << E_high[0] << "\n";
+
+    for (int e = 0; e < nbins; e++) {
+
+        // MeV->eV
+        Int_t bin1 = h->FindBin(E_low[e]  * 1e6 + 1e-9);
+        Int_t bin2 = h->FindBin(E_high[e] * 1e6 - 1e-9);
+
+        bin1 = std::max(bin1, 1);
+        bin2 = std::min(bin2, h->GetNbinsX());
+
+        if (bin1 > bin2) {
+            std::cerr << "[WARN] Ebin " << e
+                      << " [" << E_low[e] << ", " << E_high[e]
+                      << "] out of range.\n";
+            continue;
+        }
+
+        double integral = 0.0;
+        double err2_sum = 0.0;
+
+        for (int b = bin1; b <= bin2; b++) {
+            double E_center_b = h->GetBinCenter(b);   // eV
+            double width      = h->GetBinWidth(b);    // eV
+            double content    = h->GetBinContent(b);  // E·dΦ/dE
+            double error      = h->GetBinError(b);
+
+            if (E_center_b <= 0.0) continue;
+
+            // from lethargic to normal
+            integral  += (content / E_center_b) * width;
+            err2_sum  += TMath::Power((error / E_center_b) * width, 2);
+        }
+
+        flux[e]   = integral;
+        u_flux[e] = std::sqrt(err2_sum);
+
+        std::cout << "[DEBUG] Ebin " << e
+                  << " E_low=" << E_low[e]*1e6 << " eV"
+                  << " E_high=" << E_high[e]*1e6 << " eV"
+                  << " bin1=" << bin1 << " bin2=" << bin2
+                  << " integral=" << integral << "\n";
+    }
+
+    delete h;
+    return true;
+}
+
+static CrossSection cross_section_absolute(
+    const std::string&          flux_file,
+    const std::string&          flux_hist,
+    int                         nbins_beam,
+    int                         nbins_det,
+    const Vec3D&                counts_signal,
+    const Vec3D&                u_counts_signal,
+    const std::vector<double>&  eps,
+    const std::vector<double>&  u_eps,
+    const Vec2D&                dOmega,
+    int                         ebin,
+    const std::vector<double>&  E_low,
+    const std::vector<double>&  E_high,
+    double                      N_atoms,    // átomos/cm²
+    const AnalysisConfig&       cfg)
+{
+    CrossSection result{0.0, 0.0};
+
+    std::vector<double> flux, u_flux;
+    int nbins_e = (int)E_low.size();
+    if (!readFlux(flux_file, flux_hist, nbins_e, E_low, E_high, flux, u_flux))
+        return result;
+
+    double Phi   = flux[ebin];
+    double u_Phi = u_flux[ebin];
+    if (Phi <= 0.0) return result;
+
+    // correct counts by efficeincy and solid angle
+    double sum_counts = 0.0;
+
+    for (int j = 0; j < nbins_beam; j++) {
+        for (int ii = 0; ii < nbins_det; ii++) {
+            double dO = dOmega[j][ii];
+            if (dO <= 0.0 || j * dcos_det < cfg.cos_det_cut) continue;
+
+            double e = eps[ii];
+            if (e <= 0.0 || counts_signal[ebin][j][ii] < 0) continue;
+
+            sum_counts += counts_signal[ebin][j][ii] / (e * dO);
+        }
+    }
+
+    if (sum_counts <= 0.0) return result;
+
+    const double barn = 1.0e-24;
+    result.sigma = sum_counts / (Phi * N_atoms * barn);
+
+    // bootstrapping
+    TRandom3 rng(0);
+    int n_bootstrap = cfg.n_toys;
+    std::vector<double> bootstrap_sigmas(n_bootstrap);
+
+    for (int b = 0; b < n_bootstrap; b++) {
+        double bs_counts = 0.0;
+
+        for (int j = 0; j < nbins_beam; j++) {
+            for (int ii = 0; ii < nbins_det; ii++) {
+                double dO = dOmega[j][ii];
+                if (dO <= 0.0 || j * dcos_det < cfg.cos_det_cut) continue;
+
+                double e = eps[ii];
+                if (e <= 0.0) continue;
+
+                double nc = rng.Gaus(counts_signal[ebin][j][ii],
+                                     u_counts_signal[ebin][j][ii]);
+                if (nc < 0) continue;
+
+                bs_counts += nc / (e * dO);
+            }
+        }
+
+        // bootstrapping for the flux
+        double phi_bs = rng.Gaus(Phi, u_Phi);
+        if (phi_bs <= 0.0 || bs_counts <= 0.0) {
+            bootstrap_sigmas[b] = result.sigma;
+            continue;
+        }
+
+        bootstrap_sigmas[b] = bs_counts / (phi_bs * N_atoms * barn);
+    }
+
+    // uncertainty
+    double mean = 0.0;
+    for (double v : bootstrap_sigmas) mean += v;
+    mean /= n_bootstrap;
+
+    double var = 0.0;
+    for (double v : bootstrap_sigmas) var += (v - mean) * (v - mean);
     result.u_sigma = std::sqrt(var / (n_bootstrap - 1));
 
     return result;

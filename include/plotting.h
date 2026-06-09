@@ -225,7 +225,6 @@ static void plotAnisotropyRatio(
 
     // redraw graph on top of band
     g->Draw("P SAME");
-
     // ── legend ─────────────────────────────────────────────────────────
     TLegend* leg = new TLegend(0.55, 0.74, 0.93, 0.93);
     leg->SetBorderSize(0);
@@ -238,5 +237,21 @@ static void plotAnisotropyRatio(
     leg->Draw();
 
     c->RedrawAxis();
-    c->SaveAs(outname.c_str());
-}
+
+    // ── save PDF ────────────────────────────────────────────────────────
+    c->SaveAs((outname + ".pdf").c_str());
+
+    // ── save ROOT file ──────────────────────────────────────────────────
+    TFile *fout = new TFile((outname + ".root").c_str(), "RECREATE");
+    if (!fout || fout->IsZombie()) {
+        std::cerr << "[ERROR] Cannot create output ROOT file: " << outname << ".root\n";
+        return;
+    }
+    g->Write("anisotropy_ratio");
+    line->Write("isotropic_line");
+    band->Write("five_percent_band");
+    fout->Close();
+
+    std::cout << "[INFO] Saved: " << outname << ".pdf\n";
+    std::cout << "[INFO] Saved: " << outname << ".root\n";
+};

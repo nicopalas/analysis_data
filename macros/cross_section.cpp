@@ -28,7 +28,7 @@ void cross_section() {
     // ================================================================
     const double emin = 100.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins = buildLogBins(6, emin, emax);
+    const std::vector<double> energy_bins = buildLogBins(8, emin, emax);
     const int nbins = (int)energy_bins.size() - 1;
 
     AnalysisConfig cfg_u = makeUraniumConfig(energy_bins, "xs");

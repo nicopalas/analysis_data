@@ -14,7 +14,7 @@
 
 void uranium_analysis(){
 
-    const double emin = 100.;
+    const double emin = 1.;
     const double emax = 1000;
 
     const std::string outdir = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/";
@@ -147,8 +147,8 @@ void uranium_analysis(){
     // ================================================================
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
-    const int nbins_aniso = 30;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 100., 1000.0);
+    const int nbins_aniso = 48.;
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.0, 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 
@@ -189,6 +189,17 @@ void uranium_analysis(){
                                       c.roi_min, c.roi_max, i);
         std::cout << "Aniso ebin " << i << "  chi2/ndf=" << bfs_aniso[i].chi2ndf << "\n";
     }
+
+    // ── diagnóstico señal y estadística ──────────────────────────────────
+for(int i = 0; i < nbins_aniso; ++i){
+    double Ec = std::sqrt(energy_bins_aniso[i] * energy_bins_aniso[i+1]);
+    std::cout << "DIAG ebin " << i
+              << "  E="          << Ec                              << " MeV"
+              << "  entries="    << hists_tof_aniso[i]->GetEntries()
+              << "  signal="     << bfs_aniso[i].counts_subtract_bkg
+              << "  u_signal="   << bfs_aniso[i].u_counts_subtract_bkg
+              << "  chi2/ndf="   << bfs_aniso[i].chi2ndf            << "\n";
+}
 
     // --- signal ---
     Vec3D counts_signal_aniso(nbins_aniso,
@@ -266,13 +277,13 @@ void uranium_analysis(){
         if(g) g->Write();
         hists_tof_aniso[e]->Write();
     }
-    fout_aniso->Close();
 
     // --- plot anisotropy ---
     plotAnisotropy(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
                    outdir + "anisotropy_uranium_complete.pdf");
     plotAnisotropyRatio(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
-                        outdir + "anisotropy_ratio_uranium_complete.pdf");
+                        outdir + "anisotropy_ratio_uranium_complete");
+    fout_aniso->Close();
 
 
     // ================================================================
@@ -313,12 +324,31 @@ for (int e = 0; e < nbins_cs; ++e) {
         cfg_aniso.atoms,                
         cfg_aniso);
 
-    std::cout << "CS_abs ebin " << e
-              << "  E=" << Ec << " MeV"
-              << "  sigma=" << cs_abs[e].sigma
-              << " +/- "    << cs_abs[e].u_sigma << " barn\n";
 }
 
+// ── signal counts diagnostic ──────────────────────────────────────────
+std::cout << "\n=== Signal counts per energy bin ===\n";
+for (int e = 0; e < nbins_cs; ++e) {
+    double Ec = std::sqrt(energy_bins_cs[e] * energy_bins_cs[e+1]);
+    double total_signal = 0.;
+    for (int j = 0; j < nbins_beam; ++j)
+        for (int ii = 0; ii < nbins_det; ++ii)
+            total_signal += counts_signal_aniso[e][j][ii];
+    std::cout << "ebin " << e
+              << "  E="          << Ec           << " MeV"
+              << "  signal_sum=" << total_signal
+              << "  sigma="      << cs_abs[e].sigma
+              << " +/- "         << cs_abs[e].u_sigma << " barn\n";
+}
+for (int e = 0; e < nbins_eff; ++e){
+    double Ec = std::sqrt(energy_bins_eff[e] * energy_bins_eff[e+1]);
+    std::cout << "eff[" << e << "]  Ec=" << Ec << " MeV\n";
+    for (int i = 0; i < nbins_det; ++i){
+        std::cout << "  det " << i
+                  << "  eps=" << eff[e].eps[i]
+                  << " +/- "  << eff[e].u_eps[i] << "\n";
+    }
+}
 // --- save cross section ---
 TFile* fout_cs = TFile::Open(
     (outdir + "output_cross_section_uranium.root").c_str(), "RECREATE");
@@ -350,8 +380,33 @@ g_cs->SetLineColor(kRed+1);
 g_cs->SetLineWidth(2);
 g_cs->Write();
 
+// ── normalised cross section ──────────────────────────────────────────
+TH1D* h_cs_raw = new TH1D("h_cs_raw", "", nbins_cs, energy_bins_cs.data());
+for (int e = 0; e < nbins_cs; ++e){
+    h_cs_raw->SetBinContent(e+1, cs_abs[e].sigma);
+    h_cs_raw->SetBinError  (e+1, cs_abs[e].u_sigma);
+}
+TH1D* h_cs_norm = (TH1D*)h_cs_raw->Clone("h_cs_norm");
+h_cs_norm->Reset();
+normalised_xs(h_cs_raw, 8.0, 10.0, 2.006, h_cs_norm);
+
+TCanvas* c_cs = new TCanvas("c_cs", "Cross section U-238", 900, 600);
+c_cs->SetLogx();
+h_cs_norm->SetLineColor(kBlue+1);
+h_cs_norm->SetMarkerColor(kBlue+1);
+h_cs_norm->SetMarkerStyle(20);
+h_cs_norm->GetXaxis()->SetTitle("E_{n} (MeV)");
+h_cs_norm->GetYaxis()->SetTitle("#sigma (barn)");
+h_cs_norm->SetTitle("#sigma_{norm}(U-238)");
+h_cs_norm->Draw("E");
+
+fout_cs->cd();
+g_cs->Write();
+h_cs_norm->Write();
+c_cs->Write();
 fout_cs->Close();
 
-    for(int i = 0; i < nbins_eff;   ++i) delete hists_tof_eff[i];
-    for(int i = 0; i < nbins_aniso; ++i) delete hists_tof_aniso[i];
+for(int i = 0; i < nbins_eff;   ++i) delete hists_tof_eff[i];
+for(int i = 0; i < nbins_aniso; ++i) delete hists_tof_aniso[i];
+
 }

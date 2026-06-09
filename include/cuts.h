@@ -13,11 +13,11 @@ struct EventCuts {
 static EventCuts getCuts(Sample sample, double neutron_energy){
     switch(sample){
         case Sample::uranium:
-            if(neutron_energy > 1000 && neutron_energy < 1500) return {-6.,  6., 9e3, 33e3, 0.3, 0.0, 0.0};
-            if(neutron_energy > 500 && neutron_energy < 1000) return {-8.,  10., 8e3, 33e3, 0.3, 0.0, 0.0};
-            if(neutron_energy > 100)                          return {-8.,  12.,  8e3, 35e3, 0.3, 0.0, 0.0};
-            if(neutron_energy > 10)                           return {-7.,  12.,  7e3, 36e3, 0.4, 0.0, 0.0};
-            return                                                   {-8.,  16.,  6e3, 39e3, 0.3, 0.0, 0.0};
+            if(neutron_energy > 1000 && neutron_energy < 1500) return {-6.,  6., 9e3, 50e3, 0.3, 0.0, 0.0};
+            if(neutron_energy > 500 && neutron_energy < 1000) return {-10.,  8., 8e3, 50e3, 0.3, 0.0, 0.0};
+            if(neutron_energy > 100)                          return {-8.,  10.,  8e3, 50e3, 0.3, 0.0, 0.0};
+            if(neutron_energy > 10)                           return {-7.,  10.,  7e3, 50e3, 0.4, 0.0, 0.0};
+            return                                                   {-8.,  10.,  6e3, 50e3, 0.3, 0.0, 0.0};
 
         case Sample::gold:
             if (neutron_energy>1000 && neutron_energy<1500) return {-2.0, 4.0, 17e3, 35e3, 0.1, -13., -4.0};

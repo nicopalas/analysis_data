@@ -35,7 +35,7 @@ static CrossSection cross_section_ratio(
     for (int j = 0; j < nbins_beam; j++) {
         for (int ii = 0; ii < nbins_det; ii++) {
             double dO = dOmega[j][ii];
-            if (dO <= 0.0 || j*dcos_det<cfg.cos_det_cut) continue;
+            if (dO <= 0.0 || ii*dcos_det<cfg.cos_det_cut) continue;
 
             double eg = eps_gold[ii];
             double eu = eps_uranium[ii];
@@ -132,13 +132,6 @@ bool readFlux(const std::string& fname,
     h->SetDirectory(nullptr);
     f->Close();
 
-    std::cout << "[DEBUG] h_Flux: NbinsX=" << h->GetNbinsX()
-              << "  Xmin=" << h->GetXaxis()->GetXmin()
-              << "  Xmax=" << h->GetXaxis()->GetXmax()
-              << "\n";
-    std::cout << "[DEBUG] E_low[0]=" << E_low[0]
-              << "  E_high[0]=" << E_high[0] << "\n";
-
     for (int e = 0; e < nbins; e++) {
 
         // MeV->eV
@@ -173,12 +166,6 @@ bool readFlux(const std::string& fname,
 
         flux[e]   = integral;
         u_flux[e] = std::sqrt(err2_sum);
-
-        std::cout << "[DEBUG] Ebin " << e
-                  << " E_low=" << E_low[e]*1e6 << " eV"
-                  << " E_high=" << E_high[e]*1e6 << " eV"
-                  << " bin1=" << bin1 << " bin2=" << bin2
-                  << " integral=" << integral << "\n";
     }
 
     delete h;
@@ -198,7 +185,7 @@ static CrossSection cross_section_absolute(
     int                         ebin,
     const std::vector<double>&  E_low,
     const std::vector<double>&  E_high,
-    double                      N_atoms,    // átomos/cm²
+    double                      N_atoms,
     const AnalysisConfig&       cfg)
 {
     CrossSection result{0.0, 0.0};
@@ -212,18 +199,33 @@ static CrossSection cross_section_absolute(
     double u_Phi = u_flux[ebin];
     if (Phi <= 0.0) return result;
 
-    // correct counts by efficeincy and solid angle
     double sum_counts = 0.0;
+    double u2_counts  = 0.0;
 
     for (int j = 0; j < nbins_beam; j++) {
         for (int ii = 0; ii < nbins_det; ii++) {
             double dO = dOmega[j][ii];
-            if (dO <= 0.0 || j * dcos_det < cfg.cos_det_cut) continue;
+            if (dO <= 0.0 || ii * dcos_det < cfg.cos_det_cut) continue;
 
-            double e = eps[ii];
+            double e  = eps[ii];
+            double ue = u_eps[ii];
             if (e <= 0.0 || counts_signal[ebin][j][ii] < 0) continue;
 
-            sum_counts += counts_signal[ebin][j][ii] / (e * dO);
+            double c  = counts_signal[ebin][j][ii];
+            double uc = u_counts_signal[ebin][j][ii];
+
+            double contrib = c / (e * dO);
+            sum_counts += contrib;
+
+            // dc/c)^2 + (de/e)^2
+            double rel2 = (uc * uc) / (c * c) + (ue * ue) / (e * e);
+            u2_counts += contrib * contrib * rel2;
+
+            printf("  ebin=%d j=%d ii=%d | c=%.4f+/-%.4f (rel=%.4f) | e=%.6f+/-%.6f (rel=%.4f) | contrib=%.4e +/- %.4e\n",
+                ebin, j, ii,
+                c, uc, uc/c,
+                e, ue, ue/e,
+                contrib, contrib * std::sqrt(rel2));
         }
     }
 
@@ -232,48 +234,56 @@ static CrossSection cross_section_absolute(
     const double barn = 1.0e-24;
     result.sigma = sum_counts / (Phi * N_atoms * barn);
 
-    // bootstrapping
-    TRandom3 rng(0);
-    int n_bootstrap = cfg.n_toys;
-    std::vector<double> bootstrap_sigmas(n_bootstrap);
+    // sigma = sum_counts / (Phi * N * barn)
+    // (u_sigma/sigma)^2 = (u_counts/sum_counts)^2 + (u_Phi/Phi)^2
+    double rel2_total = u2_counts / (sum_counts * sum_counts)
+                      + (u_Phi * u_Phi) / (Phi * Phi);
+    result.u_sigma = result.sigma * std::sqrt(rel2_total);
 
-    for (int b = 0; b < n_bootstrap; b++) {
-        double bs_counts = 0.0;
-
-        for (int j = 0; j < nbins_beam; j++) {
-            for (int ii = 0; ii < nbins_det; ii++) {
-                double dO = dOmega[j][ii];
-                if (dO <= 0.0 || j * dcos_det < cfg.cos_det_cut) continue;
-
-                double e = eps[ii];
-                if (e <= 0.0) continue;
-
-                double nc = rng.Gaus(counts_signal[ebin][j][ii],
-                                     u_counts_signal[ebin][j][ii]);
-                if (nc < 0) continue;
-
-                bs_counts += nc / (e * dO);
-            }
-        }
-
-        // bootstrapping for the flux
-        double phi_bs = rng.Gaus(Phi, u_Phi);
-        if (phi_bs <= 0.0 || bs_counts <= 0.0) {
-            bootstrap_sigmas[b] = result.sigma;
-            continue;
-        }
-
-        bootstrap_sigmas[b] = bs_counts / (phi_bs * N_atoms * barn);
-    }
-
-    // uncertainty
-    double mean = 0.0;
-    for (double v : bootstrap_sigmas) mean += v;
-    mean /= n_bootstrap;
-
-    double var = 0.0;
-    for (double v : bootstrap_sigmas) var += (v - mean) * (v - mean);
-    result.u_sigma = std::sqrt(var / (n_bootstrap - 1));
+    printf("ebin=%d | sum_counts=%.6e +/- %.6e (rel=%.4f) | Phi=%.6e +/- %.6e (rel=%.4f) | sigma=%.6e +/- %.6e (rel=%.4f)\n",
+        ebin,
+        sum_counts, std::sqrt(u2_counts), std::sqrt(u2_counts) / sum_counts,
+        Phi, u_Phi, u_Phi / Phi,
+        result.sigma, result.u_sigma, result.u_sigma / result.sigma);
 
     return result;
+}
+
+void normalised_xs(TH1D* cross_section, double xmin, double xmax, double integral, TH1D* normalised_histo){
+    int bin_min = cross_section->FindBin(xmin);
+    int bin_max = cross_section->FindBin(xmax);
+    double integral_exp = 0.;
+    for (int i = bin_min; i<=bin_max; i++){
+        integral_exp += cross_section->GetBinContent(i) * cross_section->GetBinWidth(i);
+    }
+    std::cout << "Exp integral = " << integral_exp << std::endl;
+    std::cout << "Integral (barn*MeV) = " << integral << std::endl;
+    std::cout << "Conversion factor = " << integral_exp/integral << std::endl;
+    double conversion_factor = integral_exp / integral;
+
+    for (int i = 1; i <= cross_section->GetNbinsX(); i++){
+        double bin             = cross_section->GetBinContent(i);
+        double new_bin_content = bin / conversion_factor;
+        normalised_histo->SetBinContent(i, new_bin_content);
+        normalised_histo->SetBinError  (i, cross_section->GetBinError(i) / conversion_factor);
+    }
+
+    // ── fix value at 9 MeV to 1.007 barn ────────────────────────────
+    int bin_9MeV      = normalised_histo->FindBin(9.0);
+    double val_9MeV   = normalised_histo->GetBinContent(bin_9MeV);
+    double scale_9MeV = 1.007 / val_9MeV;
+
+    std::cout << "Value at 9 MeV before = " << val_9MeV   << " barn\n";
+    std::cout << "Scale factor at 9 MeV = " << scale_9MeV << "\n";
+
+    for (int i = 1; i <= normalised_histo->GetNbinsX(); i++){
+    normalised_histo->SetBinContent(i, normalised_histo->GetBinContent(i) * scale_9MeV);
+    normalised_histo->SetBinError  (i, normalised_histo->GetBinError(i)   * scale_9MeV);
+    std::cout << "E=" << normalised_histo->GetBinCenter(i) << " MeV"
+              << "  sigma=" << normalised_histo->GetBinContent(i) << " barn"
+              << " +/- "    << normalised_histo->GetBinError(i)   << " barn\n";
+}
+
+    std::cout << "Value at 9 MeV after  = "
+              << normalised_histo->GetBinContent(bin_9MeV) << " barn\n";
 }

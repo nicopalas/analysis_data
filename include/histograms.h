@@ -49,7 +49,7 @@ static void fillHistograms(
         EventCuts c = getCuts(cfg.sample, neutron_energy);
         if(!passAmplitudeCut(amp0, amp1, c)) continue;
         if(cos_theta_det < 0.0) continue;
-        if(cos_theta_det > 1 || std::abs(cos_theta) > 1) continue;
+        if(std::abs(cos_theta_det) >= 1 || std::abs(cos_theta) >= 1) continue;
 
         double dt = tof1 - tof0;
         hists_tof[e_bin]->Fill(dt);

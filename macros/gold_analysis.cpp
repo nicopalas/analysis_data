@@ -10,6 +10,8 @@
 #include "../include/efficiency.h"
 #include "../include/anisotropy.h"
 #include "../include/plotting.h"
+#include "../include/cross_section.h"
+
 
 
 void gold_analysis()
@@ -277,6 +279,79 @@ void gold_analysis()
                    outdir + "anisotropy_gold.pdf");
     plotAnisotropyRatio(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
                         outdir + "anisotropy_ratio_gold.pdf");
+
+const int nbins_cs = nbins_aniso;
+const std::vector<double>& energy_bins_cs = energy_bins_aniso;
+// E_low y E_high en MeV para readFlux
+std::vector<double> E_low_cs(nbins_cs), E_high_cs(nbins_cs);
+for (int e = 0; e < nbins_cs; ++e) {
+    E_low_cs[e]  = energy_bins_cs[e];
+    E_high_cs[e] = energy_bins_cs[e+1];
+}
+    // reutilizamos counts_signal_aniso, u_counts_signal_aniso y eff ya calculados
+std::vector<CrossSection> cs_abs(nbins_cs);
+for (int e = 0; e < nbins_cs; ++e) {
+
+    double Ec   = std::sqrt(energy_bins_cs[e] * energy_bins_cs[e+1]);
+    int e_eff   = findBin(energy_bins_eff, Ec);
+    if (e_eff < 0)          e_eff = 0;
+    if (e_eff >= nbins_eff) e_eff = nbins_eff - 1;
+
+    cs_abs[e] = cross_section_absolute(
+        cfg_aniso.flux_file,     
+        cfg_aniso.flux_hist,  
+        nbins_beam,
+        nbins_det,
+        counts_signal_aniso,
+        u_counts_signal_aniso,
+        eff[e_eff].eps,
+        eff[e_eff].u_eps,
+        dOmega_eff,
+        e,
+        E_low_cs,
+        E_high_cs,
+        cfg_aniso.atoms,                
+        cfg_aniso);
+
+    std::cout << "CS_abs ebin " << e
+              << "  E=" << Ec << " MeV"
+              << "  sigma=" << cs_abs[e].sigma
+              << " +/- "    << cs_abs[e].u_sigma << " barn\n";
+}
+
+// --- save cross section ---
+TFile* fout_cs = TFile::Open(
+    (outdir + "output_cross_section_gold.root").c_str(), "RECREATE");
+if (!fout_cs || fout_cs->IsZombie()) {
+    std::cerr << "Error creating cross section output file\n";
+    return;
+}
+
+// TGraphErrors con sigma vs energia
+std::vector<double> x_cs, y_cs, ex_cs, ey_cs;
+for (int e = 0; e < nbins_cs; ++e) {
+    if (cs_abs[e].sigma <= 0.0) continue;
+    double Ec = std::sqrt(energy_bins_cs[e] * energy_bins_cs[e+1]);
+    x_cs.push_back(Ec);
+    y_cs.push_back(cs_abs[e].sigma);
+    ex_cs.push_back((E_high_cs[e] - E_low_cs[e]) / 2.0);
+    ey_cs.push_back(cs_abs[e].u_sigma);
+}
+
+TGraphErrors* g_cs = new TGraphErrors(
+    (int)x_cs.size(),
+    x_cs.data(), y_cs.data(),
+    ex_cs.data(), ey_cs.data());
+g_cs->SetName("g_sigma_abs_Au197");
+g_cs->SetTitle("#sigma_{abs}(Au-197);E_{n} (MeV);#sigma (barn)");
+g_cs->SetMarkerStyle(20);
+g_cs->SetMarkerColor(kRed+1);
+g_cs->SetLineColor(kRed+1);
+g_cs->SetLineWidth(2);
+g_cs->Write();
+
+fout_cs->Close();
+
 
     for(int i = 0; i < nbins_eff;   ++i) delete hists_tof_eff[i];
     for(int i = 0; i < nbins_aniso; ++i) delete hists_tof_aniso[i];

@@ -171,8 +171,16 @@ static BackgroundFit fitBackground(
         for(int p = 0; p < f->GetNpar(); ++p)
             f_toy->SetParameter(p, f->GetParameter(p));
 
-        h_toy_tails->Fit(f_toy, "IRS Q", "", xmin, xmax);
+        auto fit_status = h_toy_tails->Fit(f_toy, "RS Q 0 N", "", xmin, xmax);
         delete h_toy_tails;
+
+        // Saltar toy si el fit no convergió
+        if (fit_status != 0 && fit_status != 4000) {
+            delete h_toy;
+            delete f_toy;
+            --itoy;  // reintentar, o simplemente continuar
+            continue;
+        }
 
         toy_integrals[itoy] = f_toy->Integral(roi_min, roi_max);
 

@@ -1,7 +1,8 @@
 
 #include "constants.h"
-
-static bool loadAcceptanceCSV(const std::string& fname, Vec2D& dOmega)
+#include <fstream>
+#include <sstream>
+inline bool loadAcceptanceCSV(const std::string& fname, Vec2D& dOmega)
 {
     dOmega.assign(nbins_beam_fine,
         std::vector<double>(nbins_det_fine, 0.0));

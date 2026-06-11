@@ -11,6 +11,7 @@
 #include "../include/anisotropy.h"
 #include "../include/plotting.h"
 #include "../include/cross_section.h"
+#include "TH2D.h"
 
 void uranium_analysis(){
 
@@ -77,18 +78,17 @@ void uranium_analysis(){
         }
     }
 
-    // --- signal ---
-    Vec3D counts_signal_eff(nbins_eff,
-        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D u_counts_signal_eff(nbins_eff,
-        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-
     std::vector<double> cs_eff(nbins_eff),            u_cs_eff(nbins_eff);
     std::vector<double> cs_upeak_eff(nbins_eff, 0.0), u_cs_upeak_eff(nbins_eff, 0.0);
     for(int i = 0; i < nbins_eff; ++i){
         cs_eff[i]   = bfs_eff[i].counts_subtract_bkg;
         u_cs_eff[i] = bfs_eff[i].u_counts_subtract_bkg;
     }
+
+    Vec3D counts_signal_eff(nbins_eff,
+    Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D u_counts_signal_eff(nbins_eff,
+    Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
     computeSignal(cfg_eff,
                   counts_roi_eff, counts_bkg_eff, counts_upeak_eff,
@@ -97,20 +97,25 @@ void uranium_analysis(){
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
-    Vec2D dOmega_fine;
-    loadAcceptanceCSV(cfg_eff.acceptance_file, dOmega_fine);
-    Vec2D dOmega_eff = rebin(dOmega_fine);
+    TFile *solid_angle = TFile::Open("/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root", "READ");
+    TH2D* hist_theta_det = (TH2D*) solid_angle->Get("theta_det_beam");
+    TH1D *acceptance_hist = (TH1D*) solid_angle->Get("acceptance");
 
+    std::vector<std::vector<double>> dOmega_eff(nbins_beam, std::vector<double>(nbins_det, 0.0));
+    for (int i = 1 ; i <= nbins_beam; i++){  
+        for (int j = 1 ; j <= nbins_det; j++){  
+            dOmega_eff[i-1][j-1] = hist_theta_det->GetBinContent(i, j);
+        }
+    }
+    solid_angle->Close();
     // --- efficiency ---
     std::vector<EfficiencyResult> eff(nbins_eff);
     for(int e = 0; e < nbins_eff; ++e)
         eff[e] = computeEfficiency(
-            nbins_det - 1,
             nbins_beam,
             nbins_det,
             counts_signal_eff,
             u_counts_signal_eff,
-            dOmega_eff,
             e);
 
     // --- save efficiency ---
@@ -147,21 +152,18 @@ void uranium_analysis(){
     // ================================================================
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
-    const int nbins_aniso = 48.;
+    const int nbins_aniso = 45;
     std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.0, 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 
-    // --- open data again ---
     TFile* fin2 = TFile::Open(cfg_aniso.input_file.c_str());
     if(!fin2 || fin2->IsZombie()){
         std::cerr << "Error opening file for anisotropy\n";
         return;
     }
     TTree* tree2 = (TTree*)fin2->Get(cfg_aniso.tree_name.c_str());
-    if(!tree2){ fin2->Close(); return; }
 
-    // --- histograms ---
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
         hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 200, -20, 20);
@@ -201,11 +203,6 @@ for(int i = 0; i < nbins_aniso; ++i){
               << "  chi2/ndf="   << bfs_aniso[i].chi2ndf            << "\n";
 }
 
-    // --- signal ---
-    Vec3D counts_signal_aniso(nbins_aniso,
-        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
-    Vec3D u_counts_signal_aniso(nbins_aniso,
-        Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
 
     std::vector<double> cs_aniso(nbins_aniso),            u_cs_aniso(nbins_aniso);
     std::vector<double> cs_upeak_aniso(nbins_aniso, 0.0), u_cs_upeak_aniso(nbins_aniso, 0.0);
@@ -213,14 +210,15 @@ for(int i = 0; i < nbins_aniso; ++i){
         cs_aniso[i]   = bfs_aniso[i].counts_subtract_bkg;
         u_cs_aniso[i] = bfs_aniso[i].u_counts_subtract_bkg;
     }
-
+    Vec3D counts_signal_aniso(nbins_aniso,
+    Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
+    Vec3D u_counts_signal_aniso(nbins_aniso,
+    Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     computeSignal(cfg_aniso,
                   counts_roi_aniso, counts_bkg_aniso, counts_upeak_aniso,
                   cs_aniso,         u_cs_aniso,
                   cs_upeak_aniso,   u_cs_upeak_aniso,
                   counts_signal_aniso, u_counts_signal_aniso);
-
-    // --- anisotropy — map each fine bin to coarse efficiency bin ---
     std::vector<AnisotropyResult> aniso(nbins_aniso);
     for(int e = 0; e < nbins_aniso; ++e){
         double Ec = std::sqrt(energy_bins_aniso[e] * energy_bins_aniso[e+1]);
@@ -309,19 +307,15 @@ for (int e = 0; e < nbins_cs; ++e) {
     if (e_eff >= nbins_eff) e_eff = nbins_eff - 1;
 
     cs_abs[e] = cross_section_absolute(
-        cfg_aniso.flux_file,     
-        cfg_aniso.flux_hist,  
-        nbins_beam,
-        nbins_det,
-        counts_signal_aniso,
-        u_counts_signal_aniso,
-        eff[e_eff].eps,
-        eff[e_eff].u_eps,
+        cfg_aniso.flux_file,
+        cfg_aniso.flux_hist,
+        nbins_beam, nbins_det,
+        counts_signal_aniso,      u_counts_signal_aniso,
+        eff[e_eff].eps,           eff[e_eff].u_eps,
         dOmega_eff,
         e,
-        E_low_cs,
-        E_high_cs,
-        cfg_aniso.atoms,                
+        E_low_cs, E_high_cs,
+        cfg_aniso.atoms,
         cfg_aniso);
 
 }
@@ -408,5 +402,4 @@ fout_cs->Close();
 
 for(int i = 0; i < nbins_eff;   ++i) delete hists_tof_eff[i];
 for(int i = 0; i < nbins_aniso; ++i) delete hists_tof_aniso[i];
-
 }

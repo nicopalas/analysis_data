@@ -5,6 +5,8 @@
 #include "TRandom3.h"
 #include <cmath>
 #include <vector>
+#include "TFile.h"
+#include "TLine.h"
 
 struct CrossSection {
     double sigma;
@@ -213,6 +215,7 @@ static CrossSection cross_section_absolute(
 
             double c  = counts_signal[ebin][j][ii];
             double uc = u_counts_signal[ebin][j][ii];
+            if (c <= 0.0) continue;
 
             double contrib = c / (e * dO);
             sum_counts += contrib;
@@ -234,8 +237,6 @@ static CrossSection cross_section_absolute(
     const double barn = 1.0e-24;
     result.sigma = sum_counts / (Phi * N_atoms * barn);
 
-    // sigma = sum_counts / (Phi * N * barn)
-    // (u_sigma/sigma)^2 = (u_counts/sum_counts)^2 + (u_Phi/Phi)^2
     double rel2_total = u2_counts / (sum_counts * sum_counts)
                       + (u_Phi * u_Phi) / (Phi * Phi);
     result.u_sigma = result.sigma * std::sqrt(rel2_total);

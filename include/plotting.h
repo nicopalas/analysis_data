@@ -8,6 +8,10 @@
 #include "TF1.h"
 #include <vector>
 #include <string>
+#include "TFile.h"
+#include "TLine.h"
+#include "TLine.h"
+#include "TFile.h"
 
 static void plotBackgroundFits(
     std::vector<TH1D*>& hists_tof,
@@ -36,7 +40,7 @@ static void plotEfficiency(
     const std::vector<double>& energy_bins,
     const std::string& outname)
 {
-    double centers[10];
+    double centers[nbins_det];
     for(int i = 0; i < nbins_det; ++i) centers[i] = (i + 0.5) * (1.0/nbins_det);
 
     int colors[] = {
@@ -75,7 +79,6 @@ static void plotEfficiency(
             gr->SetTitle("");
             gr->GetXaxis()->SetTitle("cos(#theta')");
             gr->GetYaxis()->SetTitle("#varepsilon(cos#theta')");
-            gr->GetYaxis()->SetRangeUser(0.0, 1.2);
             gr->Draw("ALP");
         } else {
             gr->Draw("LP SAME");
@@ -254,4 +257,4 @@ static void plotAnisotropyRatio(
 
     std::cout << "[INFO] Saved: " << outname << ".pdf\n";
     std::cout << "[INFO] Saved: " << outname << ".root\n";
-};
+}

@@ -30,7 +30,7 @@ static AnisotropyResult anisotropy (
         double counts = 0.;
         double denom = 0;
         for (int j = 0; j<nbins_det; j++){
-            if (j*dcos_det>= cfg.cos_det_cut && eps[j]>0 && dOmega[i][j]>0){
+            if (j*dcos_det> cfg.cos_det_cut && eps[j]>0.01 && dOmega[i][j]>0){
                 double counts_sig = counts_signal[ebin][i][j];
                 counts+= counts_sig>=0 ? counts_sig : 0.0 ;
                 denom+=(eps[j]*dOmega[i][j]);
@@ -52,7 +52,7 @@ static AnisotropyResult anisotropy (
         std::vector<double> eps_b(nbins_det,0.0);
         std::vector<double> counts_theta_toy(nbins_beam, 0.0);
         for (int j = 0; j<nbins_det;j++){
-            if (eps[j]==0) continue; // same fluctuation in efficiency for every beam bin for a given det (preserves correlation)
+            if (eps[j]<0.01) continue; // same fluctuation in efficiency for every beam bin for a given det (preserves correlation)
             eps_b[j] = rng.Gaus(eps[j],u_eps[j]);
             while (eps_b[j]<=0) eps_b[j]= rng.Gaus(eps[j],u_eps[j]);
         }

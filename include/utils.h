@@ -2,7 +2,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-
+#include <iostream>
 
 // ---------------------utils.h----------------------
 // functions that are used frequently

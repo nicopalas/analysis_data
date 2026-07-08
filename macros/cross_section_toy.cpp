@@ -5,7 +5,7 @@ void cross_section_toy(){
 
     // ── input data ────────────────────────────────────────────────────────────
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*)fin->Get("events_uranium");
     if (!tin) { std::cerr << "Tree not found\n"; return; }
@@ -32,7 +32,7 @@ void cross_section_toy(){
     flux_file->Close();
 
     // ── energy binning ────────────────────────────────────────────────────────
-    const int nbins = 50;
+    const int nbins = 30;
     std::vector<double> energy_bins = buildLogBins(nbins, 1.0, 1000.0);
     std::vector<double> E_low(nbins), E_high(nbins);
     for (int e = 0; e < nbins; ++e) {
@@ -66,7 +66,7 @@ void cross_section_toy(){
 
     // ── branch addresses ──────────────────────────────────────────────────────
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double  amp0, amp1;
     double cos_theta, cos_theta_det;
     tin->SetBranchAddress("tof1",           &tof1);
     tin->SetBranchAddress("tof0",           &tof0);
@@ -87,11 +87,9 @@ void cross_section_toy(){
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
+        double sum_amp = amp1;
 
-        double dt      = tof1 - tof0;
-        double sum_amp = amp0 + amp1;
-
-        if (cut->IsInside(sum_amp, dt))
+        if (amp0>8000)
             counts[bin]++;
     }
 
@@ -115,7 +113,7 @@ void cross_section_toy(){
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
-        if (abs(dt)>10 || amp_sum<10000) continue;
+        if (amp0<8000) continue;
         counts_cut[bin]++;
     }
     TH1D *counts_hist_cut = new TH1D("counts_cut", "", nbins, 1.0, 1000.);

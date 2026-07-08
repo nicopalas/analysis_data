@@ -28,7 +28,7 @@ struct BackgroundFit {
 
 static std::string getBackgroundFormula(Sample sample){
     switch(sample){
-        case Sample::uranium: return "[0]+[1]*x";
+        case Sample::uranium: return "[0]";
         case Sample::gold:    return "[0]+[1]*x+[2]*x*x"
                                      "+[3]*TMath::Gaus(x,[4],[5],1)"
                                      "+[6]*TMath::Gaus(x,[7],[8],1)";
@@ -39,14 +39,14 @@ static std::string getBackgroundFormula(Sample sample){
 static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
     switch(sample){
         case Sample::uranium:
-            f->SetParLimits(0, 0, 1e5);
+            f->SetParLimits(0, 0, 1000);
             break;
         case Sample::gold:
             f->SetParLimits(0,  0.0,  1e6);
             f->SetParLimits(1, -5.0,  5.0);
             f->SetParLimits(2, -1.0,  1.0);
             f->SetParLimits(3,  0.0,  1e6);
-            f->SetParLimits(4, -15.0, -5.0);
+            f->SetParLimits(4, -13.0, -5.0);
             f->SetParLimits(5,  0.5,  4.0);
             f->SetParLimits(6,  0.0,  1e6);
             f->SetParLimits(7, -2.0,  2.0);
@@ -68,10 +68,8 @@ static void decomposeGoldIntegrals(
     double& counts_upeak, double& u_counts_upeak)
 {
     // continuum: polynomial only [0]+[1]*x+[2]*x*x
-    TF1 f_poly("f_poly_decomp", "[0]+[1]*x+[2]*x*x", roi_min, roi_max);
-    f_poly.SetParameters(f->GetParameter(0),
-                         f->GetParameter(1),
-                         f->GetParameter(2));
+    TF1 f_poly("f_poly_decomp", "[0]", roi_min, roi_max);
+    f_poly.SetParameters(f->GetParameter(0));
     counts_bkg = f_poly.Integral(roi_min, roi_max);
 
     // uranium peak: first gaussian [3]*Gaus(x,[4],[5],1)

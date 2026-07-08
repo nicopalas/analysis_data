@@ -10,7 +10,7 @@ void acceptance_mc(){
 
     const int nevents = 1e7;
     const double target_radius = 4; // cm
-    const double target_thickness = 0.4e-4; //cm
+    const double target_thickness = 0.411e-4; //cm
     const double ppac_half = 10; 
     int missed = 0;
     int coincidence = 0;
@@ -18,8 +18,8 @@ void acceptance_mc(){
     int counts_backward = 0;
     double z_front = 2.5+0.32;
     double z_back = -2.5-0.32;
-    const int nbins_beam = 40;
-    const int nbins_det = 40;
+    const int nbins_beam = 20;
+    const int nbins_det = 20;
     const double dcos_beam = double(1./nbins_beam);
     const double dcos_det = double(1./nbins_det);
 

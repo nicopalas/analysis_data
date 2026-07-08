@@ -15,13 +15,13 @@ struct AnalysisConfig {
     std::string efficiency_file;
     std::vector<double> energy_bins_eff;
     double cos_det_cut = 0.5;
-    int    bins_beam  = 40;
-    int    bins_det   = 40;
+    int    bins_beam  = 20;
+    int    bins_det   = 20;
     int    n_toys      = 500;   
     double atoms = 0.0;
     std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root";
-    std::string flux_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/flux_data/Energy_EAR1_FLUKA_500bdp.root";
-    std::string flux_hist = "h_Flux";
+    std::string flux_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/flux_data/evalFlux_prelim.root";
+    std::string flux_hist = "hEval_Abs";
 
 };
 
@@ -32,7 +32,7 @@ static AnalysisConfig makeUraniumConfig(
     AnalysisConfig c;
     c.sample          = Sample::uranium;
     c.tree_name       = "events_uranium";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
     c.efficiency_file = "output_efficiency_uranium.root";
@@ -48,7 +48,7 @@ static AnalysisConfig makeGoldConfig(
     AnalysisConfig c;
     c.sample          = Sample::gold;
     c.tree_name       = "events_gold";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
     c.efficiency_file = "output_efficiency_gold.root";

@@ -43,8 +43,8 @@ static CrossSection cross_section_ratio(
             double eu = eps_uranium[ii];
             if (eg <= 0.0 || eu <= 0.0 || counts_signal_gold[ebin][j][ii]<0 || counts_signal_uranium[ebin][j][ii]<0 ) continue;
 
-            sum_gold    += counts_signal_gold[ebin][j][ii]    / (eg * dO);
-            sum_uranium += counts_signal_uranium[ebin][j][ii] / (eu * dO);
+            sum_gold    += counts_signal_gold[ebin][j][ii]    / (eg*dO);
+            sum_uranium += counts_signal_uranium[ebin][j][ii] / (eu*dO);
         }
     }
 
@@ -217,7 +217,7 @@ static CrossSection cross_section_absolute(
             double uc = u_counts_signal[ebin][j][ii];
             if (c <= 0.0) continue;
 
-            double contrib = c / (e * dO);
+            double contrib = c / (e);
             sum_counts += contrib;
 
             // dc/c)^2 + (de/e)^2

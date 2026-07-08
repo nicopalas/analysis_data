@@ -30,10 +30,10 @@ static AnisotropyResult anisotropy (
         double counts = 0.;
         double denom = 0;
         for (int j = 0; j<nbins_det; j++){
-            if (j*dcos_det> cfg.cos_det_cut && eps[j]>0.01 && dOmega[i][j]>0){
+            if (j*dcos_det> cfg.cos_det_cut && eps[j]>0.01 && dOmega[i][j]>1e-6){
                 double counts_sig = counts_signal[ebin][i][j];
                 counts+= counts_sig>=0 ? counts_sig : 0.0 ;
-                denom+=(eps[j]*dOmega[i][j]);
+                denom+= counts_sig>=0 ? (eps[j]*dOmega[i][j]) : 0.0;
             }
         }
         counts_theta.push_back(counts/denom);
@@ -60,7 +60,7 @@ static AnisotropyResult anisotropy (
             double counts_b = 0.0;
             double denom_b = 0.0;
                 for (int j = 0 ; j < nbins_det; j++){
-                    if (j*dcos_det>=cfg.cos_det_cut && dOmega[i][j]>0 && eps_b[j]>0){
+                    if (j*dcos_det>=cfg.cos_det_cut && eps_b[j]>0 && dOmega[i][j]>1e-6){
                         if (counts_signal[ebin][i][j] <= 0) continue; 
                         double mu = std::max(0.0, counts_signal[ebin][i][j]); // avoid negative counts
                         double counts_signal_b = rng.Gaus (mu, u_counts_signal[ebin][i][j]);

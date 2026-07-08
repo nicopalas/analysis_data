@@ -28,9 +28,9 @@ static void fillHistograms(
 
     double cos_theta_det, cos_theta;
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double  amp0, amp1;
     double x0,x1,y0,y1;
-
+    double phi, phi_det;
     tree->SetBranchAddress("tof1",          &tof1);
     tree->SetBranchAddress("tof0",          &tof0);
     tree->SetBranchAddress("amp0",          &amp0);
@@ -40,15 +40,15 @@ static void fillHistograms(
     tree->SetBranchAddress("y0",           &y0);
     tree->SetBranchAddress("y1",           &y1);
     tree->SetBranchAddress("neutron_energy",&neutron_energy);
+    tree->SetBranchAddress("cos_theta", &cos_theta);
+    tree->SetBranchAddress("cos_theta_det", &cos_theta_det);
+    tree->SetBranchAddress("phi", &phi);
+    tree->SetBranchAddress("phi_det", &phi_det);
 
     Long64_t nentries = tree->GetEntries();
 
     for (Long64_t i = 0; i < nentries; i++) {
         tree->GetEntry(i);
-        double cos_theta_det = 5.0 /(sqrt((x0-x1-5.0)*(x0-x1-5.0) + (y1-y0)*(y1-y0)+25));
-        double phi_det = TMath::ATan2(y1-y0,x0-x1-5.0);
-        double sin_theta_det = std::sqrt(1-cos_theta_det*cos_theta_det);
-        double cos_theta = 1/sqrt(2) * (-sin_theta_det*std::cos(phi_det)+cos_theta_det);
         if(neutron_energy < emin || neutron_energy > emax) continue;
         int e_bin = findBin(cfg.energy_bins, neutron_energy);
         if(e_bin < 0 || e_bin >= nbins) continue;
@@ -57,7 +57,6 @@ static void fillHistograms(
         if(!passAmplitudeCut(amp0, amp1, c)) continue;
         if(cos_theta_det < 0.0) continue;
         if(std::fabs(cos_theta_det) > 1 || std::fabs(cos_theta) > 1) continue;
-
         double dt = tof1 - tof0;
         hists_tof[e_bin]->Fill(dt);
 
@@ -88,7 +87,7 @@ static void fillRooDatasets(
     int nbins = (int)cfg.energy_bins.size() - 1;
 
     double cos_theta, cos_theta_det, neutron_energy, tof1, tof0;
-    float  amp0, amp1;
+    double  amp0, amp1;
 
     tree->SetBranchAddress("cos_theta",     &cos_theta);
     tree->SetBranchAddress("cos_theta_det", &cos_theta_det);

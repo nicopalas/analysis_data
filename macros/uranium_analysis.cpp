@@ -99,14 +99,27 @@ void uranium_analysis(){
     // --- acceptance ---
     TFile *solid_angle = TFile::Open("/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root", "READ");
     TH2D* hist_theta_det = (TH2D*) solid_angle->Get("theta_det_beam");
-    TH1D *acceptance_hist = (TH1D*) solid_angle->Get("acceptance");
-
     std::vector<std::vector<double>> dOmega_eff(nbins_beam, std::vector<double>(nbins_det, 0.0));
-    for (int i = 1 ; i <= nbins_beam; i++){  
-        for (int j = 1 ; j <= nbins_det; j++){  
-            dOmega_eff[i-1][j-1] = hist_theta_det->GetBinContent(i, j);
+    double sum_solid = 0.0;
+
+    for (int i = 1; i <= nbins_beam_fine; i++) {
+        for (int j = 1; j <= nbins_det_fine; j++) {
+            int i_rebin = (i - 1) / 2;
+            int j_rebin = (j - 1) / 2;
+        
+            if (i_rebin < nbins_beam && j_rebin < nbins_det) {
+                dOmega_eff[i_rebin][j_rebin] += hist_theta_det->GetBinContent(i, j);
+                sum_solid+=hist_theta_det->GetBinContent(i, j);
         }
     }
+}
+    for (int i = 0 ; i<nbins_det; i++){
+        for (int j = 0; j<nbins_beam; j++){
+            dOmega_eff[j][i]/=sum_solid;
+            std::cout << "dOMega bin_det = " << i << ", bin_beam = " << j << " = " << dOmega_eff[j][i] << std::endl;
+        }
+    }
+    
     solid_angle->Close();
     // --- efficiency ---
     std::vector<EfficiencyResult> eff(nbins_eff);
@@ -152,7 +165,7 @@ void uranium_analysis(){
     // ================================================================
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
-    const int nbins_aniso = 45;
+    const int nbins_aniso = 35;
     std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.0, 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
@@ -166,7 +179,7 @@ void uranium_analysis(){
 
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
-        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 200, -20, 20);
+        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 100, -15, 15);
         hists_tof_aniso[i]->SetDirectory(0);
     }
 
@@ -268,7 +281,7 @@ for(int i = 0; i < nbins_aniso; ++i){
                 "W(#theta)/W(90) %.1f-%.1f MeV;"
                 "cos(#theta_{beam});W(#theta)/W(90)",
                 energy_bins_aniso[e], energy_bins_aniso[e+1]));
-            g->SetMinimum(0.8);
+            g->SetMinimum(0.4);
             g->SetMaximum(2.5);
         }
 

@@ -2,26 +2,18 @@
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/utils.h"
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/types.h"
 
-
-
 void efficiency_toy(){
 
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*)fin->Get("events_uranium");
     if (!tin) { std::cerr << "Tree not found\n"; return; }
-    
 
-    // ── cuts ─────────────────────────────────────────────────────────────────
-    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/uranium0.root", "READ");
-    if (!fcut0 || fcut0->IsZombie()) { std::cerr << "Cannot open cut0 file\n"; return; }
-    TCutG *cut0 = (TCutG*)fcut0->Get("uranium0");
-    if (!cut0) { std::cerr << "TCutG gold0 not found\n"; return; }
 
-    TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/uranium1.root", "READ");
+    TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/amps_sum_uranium.root", "READ");
     if (!fcut1 || fcut1->IsZombie()) { std::cerr << "Cannot open cut1 file\n"; return; }
-    TCutG *cut1 = (TCutG*)fcut1->Get("uranium1");
+    TCutG *cut1 = (TCutG*)fcut1->Get("amps_sum");
     if (!cut1) { std::cerr << "TCutG gold1 not found\n"; return; }
 
     TFile *fcut2 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/amps_uranium.root", "READ");
@@ -49,10 +41,11 @@ void efficiency_toy(){
         E_high[e] = energy_bins[e+1];
     }
 
-     // ── event loop ───────────────────────────────────────────────────────────
+     // event loop 
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double  amp0, amp1;
     double x0,x1,y0,y1;
+    double cos_theta, cos_theta_det;
     tin->SetBranchAddress("tof1",           &tof1);
     tin->SetBranchAddress("tof0",           &tof0);
     tin->SetBranchAddress("amp0",           &amp0);
@@ -62,15 +55,13 @@ void efficiency_toy(){
     tin->SetBranchAddress("y0",           &y0);
     tin->SetBranchAddress("y1",           &y1);
     tin->SetBranchAddress("neutron_energy", &neutron_energy);
+    tin->SetBranchAddress("cos_theta", &cos_theta);
+    tin->SetBranchAddress("cos_theta_det", &cos_theta_det);
     Vec3D counts(nbins,
     Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Long64_t nentries = tin->GetEntries();
     for (int i = 0 ; i < nentries; i++){
         tin->GetEntry(i);
-        double cos_theta_det = 5.0 /(sqrt((x0-x1-5.0)*(x0-x1-5.0) + (y1-y0)*(y1-y0)+25));
-        double phi_det = TMath::ATan2(y1-y0,x0-x1-5.0);
-        double sin_theta_det = std::sqrt(1-cos_theta_det*cos_theta_det);
-        double cos_theta = 1/sqrt(2) * (-sin_theta_det*std::cos(phi_det)+cos_theta_det);
         double dt = tof1-tof0;
         if (std::fabs(cos_theta)>1 || std::fabs(cos_theta_det)>1) continue; // no cathodes available -> -9999
         if (neutron_energy < 1.0 || neutron_energy > 1000.0) continue;
@@ -79,13 +70,12 @@ void efficiency_toy(){
         if (bin < 0 || bin >= nbins) continue;
         int bin_beam = int(std::fabs(cos_theta)/dcos_beam);
         int bin_det = int(std::fabs(cos_theta_det)/dcos_det);
-        if (cut0->IsInside(amp0, dt) && cut1->IsInside(amp1,dt)){
+        if (cut1->IsInside(amp1+amp0,dt) && cut2->IsInside(amp1, amp0)){
             counts[bin][bin_beam][bin_det]++;
         }
     }
     std::cout << "Cheguei" << std::endl;
     fin->Close();
-    fcut0->Close();
     fcut1->Close();
     fcut2->Close();
 
@@ -96,6 +86,140 @@ void efficiency_toy(){
         efficiencies[i]->SetDirectory(0);
     }
 
+for (int ebin = 0; ebin < nbins; ebin++){
+    int ref_bin = nbins_det - 1;
+    
+    // Set reference bin (highest cos(theta_det)) to 1
+    efficiencies[ebin]->SetBinContent(ref_bin + 1, 1.0);
+    efficiencies[ebin]->SetBinError(ref_bin + 1, 0.0);
+    
+    // Loop backwards from second-to-last bin to first bin (including bin 0)
+    for (int bin_det = ref_bin - 1; bin_det >= 0; bin_det--){
+        double counts_det = 0.0;
+        double counts_ref = 0.0;
+        int n_overlap = 0;  // Track number of valid beam bins
+        
+        // Accumulate counts over beam bins
+        for (int bin_beam = 0; bin_beam < nbins_beam; bin_beam++){
+            // Check if acceptance is valid for both detector bins
+            if (acceptance[bin_beam][bin_det] <= 0.0 || acceptance[bin_beam][ref_bin] <= 0.0) 
+                continue;
+            
+            // Check if counts are valid
+            if (counts[ebin][bin_beam][ref_bin] <= 0.0 || counts[ebin][bin_beam][bin_det] <= 0.0) 
+                continue;
+            
+            // Accumulate counts corrected by acceptance
+            counts_det += counts[ebin][bin_beam][bin_det] / acceptance[bin_beam][bin_det];
+            counts_ref += counts[ebin][bin_beam][ref_bin] / acceptance[bin_beam][ref_bin];
+            n_overlap++;
+        }
+        
+        // Check if we have valid counts
+        if (counts_det <= 0.0 || counts_ref <= 0.0 || n_overlap == 0) {
+            // Set to 0 instead of nan
+            efficiencies[ebin]->SetBinContent(bin_det + 1, 0.0);
+            efficiencies[ebin]->SetBinError(bin_det + 1, 0.0);
+            
+            // Print warning for debugging
+            std::cout << "WARNING: Ebin " << ebin << ", bin_det " << bin_det 
+                      << ": counts_det=" << counts_det 
+                      << ", counts_ref=" << counts_ref 
+                      << ", n_overlap=" << n_overlap << std::endl;
+            
+            ref_bin = bin_det;
+            continue;
+        }
+        
+        // Get reference efficiency and its uncertainty
+        double eff_ref_bin = efficiencies[ebin]->GetBinContent(ref_bin + 1);
+        double u_eff_ref_bin = efficiencies[ebin]->GetBinError(ref_bin + 1);
+        
+        // Check if reference efficiency is valid
+        if (!std::isfinite(eff_ref_bin) || eff_ref_bin <= 0.0) {
+            std::cout << "WARNING: Ebin " << ebin << ", bin_det " << bin_det 
+                      << ": eff_ref_bin=" << eff_ref_bin << " is invalid!" << std::endl;
+            
+            efficiencies[ebin]->SetBinContent(bin_det + 1, 0.0);
+            efficiencies[ebin]->SetBinError(bin_det + 1, 0.0);
+            ref_bin = bin_det;
+            continue;
+        }
+        
+        // Calculate efficiency
+        double eff = eff_ref_bin * (counts_det / counts_ref);
+        
+        // Calculate uncertainty with proper error propagation
+        // Include Poisson uncertainties from counts
+        double rel2 = 0.0;
+        
+        // Uncertainty from reference efficiency
+        if (u_eff_ref_bin > 0.0 && eff_ref_bin > 0.0) {
+            rel2 += pow(u_eff_ref_bin / eff_ref_bin, 2);
+        }
+        
+        // Poisson uncertainty from counts_det (after acceptance correction)
+        if (counts_det > 0.0) {
+            // Need to properly propagate uncertainty through acceptance correction
+            // For Poisson, variance = counts, but after dividing by acceptance:
+            // var(counts_det) = sum(var(counts_raw)/acceptance^2)
+            // For simplicity, we use the corrected count as an estimate
+            rel2 += 1.0 / counts_det;
+        }
+        
+        // Poisson uncertainty from counts_ref (after acceptance correction)
+        if (counts_ref > 0.0) {
+            rel2 += 1.0 / counts_ref;
+        }
+        
+        double u_eff = 0.0;
+        if (rel2 > 0.0 && eff > 0.0) {
+            u_eff = eff * std::sqrt(rel2);
+        } else {
+            u_eff = 0.0;
+        }
+        
+        // Final check for nan/inf
+        if (!std::isfinite(eff) || !std::isfinite(u_eff)) {
+            std::cout << "WARNING: Ebin " << ebin << ", bin_det " << bin_det 
+                      << ": eff=" << eff << ", u_eff=" << u_eff << " are invalid!" << std::endl;
+            
+            efficiencies[ebin]->SetBinContent(bin_det + 1, 0.0);
+            efficiencies[ebin]->SetBinError(bin_det + 1, 0.0);
+        } else {
+            // Store valid efficiency
+            efficiencies[ebin]->SetBinContent(bin_det + 1, eff);
+            efficiencies[ebin]->SetBinError(bin_det + 1, u_eff);
+        }
+        
+        // Update reference bin for next iteration
+        ref_bin = bin_det;
+    }
+}
+
+// Print summary of efficiencies to check for nan/inf
+std::cout << "\n=== EFFICIENCY SUMMARY ===\n";
+for (int ebin = 0; ebin < nbins; ebin++) {
+    std::cout << "\nEbin " << ebin << ":\n";
+    int valid_bins = 0;
+    for (int bin = 1; bin <= nbins_det; bin++) {
+        double content = efficiencies[ebin]->GetBinContent(bin);
+        double error = efficiencies[ebin]->GetBinError(bin);
+        
+        if (std::isfinite(content) && std::isfinite(error)) {
+            if (content > 0.0 || error > 0.0) {
+                valid_bins++;
+                if (valid_bins <= 5) {  // Print first 5 valid bins
+                    printf("  bin %d: eff=%.6f ± %.6f\n", bin, content, error);
+                }
+            }
+        } else {
+            std::cout << "  bin " << bin << ": INVALID (nan/inf)\n";
+        }
+    }
+    std::cout << "  Total valid bins: " << valid_bins << " / " << nbins_det << std::endl;
+}
+    /*
     for (int ebin = 0; ebin < nbins; ebin++){
         for (int bin_det = 0; bin_det < nbins_det; bin_det++){
             double counts_det = 0.0;
@@ -107,8 +231,9 @@ void efficiency_toy(){
             efficiencies[ebin]->SetBinError(bin_det+1, std::sqrt(counts_det));
         }
     }
+    */
     
-    // CORREGIDO: efficiencies_beam - eficiencia como función del ángulo del haz
+    
     std::vector<TH1D*> efficiencies_beam (nbins, nullptr);
     for (int i = 0 ; i < nbins ; i++){
         // El eje X ahora es nbins_beam (ángulo del haz), no nbins_det
@@ -118,9 +243,9 @@ void efficiency_toy(){
     }
 
     for (int ebin = 0; ebin < nbins; ebin++){
-        for (int bin_beam = 0; bin_beam < nbins_beam; bin_beam++){  // loop sobre beam bins
+        for (int bin_beam = 0; bin_beam < nbins_beam; bin_beam++){
             double counts_beam = 0.0;
-            for (int bin_det = 0; bin_det < nbins_det; bin_det++){  // loop sobre detector bins
+            for (int bin_det = 0; bin_det < nbins_det; bin_det++){ 
                 if (acceptance[bin_beam][bin_det] == 0) continue;
                 counts_beam += counts[ebin][bin_beam][bin_det];
             }
@@ -128,10 +253,8 @@ void efficiency_toy(){
             efficiencies_beam[ebin]->SetBinError(bin_beam+1, std::sqrt(counts_beam));
         }
     }
-    std::cout << "Cheguei 2" << std::endl;
-// Guardar conteos originales antes de modificar
 auto counts_original = counts;
-// ── Vectores de histogramas para el chequeo ─────────────────────────
+
 std::vector<TH1D*> h_eff_check(nbins, nullptr);
 std::vector<TH1D*> h_avg_acceptance(nbins, nullptr);
 
@@ -205,7 +328,6 @@ for (int ebin = 0; ebin < nbins; ebin++) {
     }
 }
 
-// ── Imprimir resultados del chequeo ─────────────────────────────────
 std::cout << "\n=== ACCEPTANCE CORRECTION CHECK ===\n";
 for (int ebin = 0; ebin < nbins; ebin++) {
     std::cout << "\n--- Ebin " << ebin << " (E = " << E_low[ebin] << "-" << E_high[ebin] << " MeV) ---\n";
@@ -215,7 +337,6 @@ for (int ebin = 0; ebin < nbins; ebin++) {
     for (int bin_det = 0; bin_det < nbins_det; bin_det++) {
         double N_det = 0, N_est = 0;
         
-        // Recalcular para imprimir (o usar los histogramas)
         for (int bin_beam = 0; bin_beam < nbins_beam; bin_beam++) {
             double cnt = counts_original[ebin][bin_beam][bin_det];
             double acc = acceptance[bin_beam][bin_det];
@@ -237,13 +358,8 @@ for (int ebin = 0; ebin < nbins; ebin++) {
 
 std::cout << "Cheguei 3" << std::endl;
 
-// ── Continuar con el cálculo de eficiencias ─────────────────────────
-// ... (tu código existente para efficiencies[ebin])
-
-// ── Guardar todo ────────────────────────────────────────────────────
 TFile *fout = new TFile("/Users/nico/Desktop/Tese/Analysis/cross_section/efficiencies_u_toy.root", "RECREATE");
 
-// Guardar histogramas de eficiencia (los tuyos originales)
 for (int i = 0; i < nbins; i++) {
     efficiencies[i]->Write();
     efficiencies_beam[i]->Write();

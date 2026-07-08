@@ -103,20 +103,30 @@ void gold_analysis()
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
-    Vec2D dOmega_fine;
-    loadAcceptanceCSV(cfg_eff.acceptance_file, dOmega_fine);
-    Vec2D dOmega_eff = rebin(dOmega_fine);
+    TFile *solid_angle = TFile::Open("/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root", "READ");
+    TH2D* hist_theta_det = (TH2D*) solid_angle->Get("theta_det_beam");
+    std::vector<std::vector<double>> dOmega_eff(nbins_beam, std::vector<double>(nbins_det, 0.0));
+
+    for (int i = 1; i <= nbins_beam_fine; i++) {
+        for (int j = 1; j <= nbins_det_fine; j++) {
+            int i_rebin = (i - 1) / 2;
+            int j_rebin = (j - 1) / 2;
+        
+            if (i_rebin < nbins_beam && j_rebin < nbins_det) {
+                dOmega_eff[i_rebin][j_rebin] += hist_theta_det->GetBinContent(i, j);
+        }
+    }
+}
+    solid_angle->Close();
 
     // --- efficiency ---
     std::vector<EfficiencyResult> eff(nbins_eff);
     for(int e = 0; e < nbins_eff; ++e)
         eff[e] = computeEfficiency(
-            nbins_det - 1,
             nbins_beam,
             nbins_det,
             counts_signal_eff,
             u_counts_signal_eff,
-            dOmega_eff,
             e);
 
     // --- save efficiency ---

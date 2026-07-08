@@ -3,9 +3,10 @@
 
 void gold_cross_section(){
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selected.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*)fin->Get("events_gold");
+    TTree *tin_u = (TTree*) fin->Get("events_uranium");
     if (!tin) { std::cerr << "Tree not found\n"; return; }
 
     TFile *flux_file = TFile::Open(
@@ -21,15 +22,17 @@ void gold_cross_section(){
     flux_file->Close();
 
     // ── cuts ─────────────────────────────────────────────────────────────────
-    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold0.root", "READ");
+    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/sum_amps_gold.root", "READ");
     if (!fcut0 || fcut0->IsZombie()) { std::cerr << "Cannot open cut0 file\n"; return; }
-    TCutG *cut0 = (TCutG*)fcut0->Get("gold0");
+    TCutG *cut0 = (TCutG*)fcut0->Get("sum_amps");
     if (!cut0) { std::cerr << "TCutG gold0 not found\n"; return; }
 
-    TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold1.root", "READ");
+    TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/amps_gold.root", "READ");
     if (!fcut1 || fcut1->IsZombie()) { std::cerr << "Cannot open cut1 file\n"; return; }
-    TCutG *cut1 = (TCutG*)fcut1->Get("gold1");
+    TCutG *cut1 = (TCutG*)fcut1->Get("amps");
     if (!cut1) { std::cerr << "TCutG gold1 not found\n"; return; }
+
+
 
     // ── energy binning ────────────────────────────────────────────────────────
     const int nbins = 10;
@@ -65,7 +68,7 @@ void gold_cross_section(){
 
     // ── event loop ───────────────────────────────────────────────────────────
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double  amp0, amp1;
     tin->SetBranchAddress("tof1",           &tof1);
     tin->SetBranchAddress("tof0",           &tof0);
     tin->SetBranchAddress("amp0",           &amp0);
@@ -77,14 +80,13 @@ void gold_cross_section(){
 
     for (Long64_t i = 0; i < nentries; i++){
         tin->GetEntry(i);
-        if (neutron_energy < 50.0 || neutron_energy > 1000.0) continue;
+        if (neutron_energy < 10.0 || neutron_energy > 1000.0) continue;
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
 
         double dt = tof1 - tof0;
-        if (amp0 + amp1 < 13e3) continue;
-        if (cut0->IsInside(amp0, dt) && cut1->IsInside(amp1, dt))
+        if (cut0->IsInside(amp0+amp1, dt) && cut1->IsInside(amp1, amp0))
             counts[bin]++;
     }
     fin->Close();

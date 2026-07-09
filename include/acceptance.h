@@ -1,5 +1,6 @@
 
 #include "constants.h"
+#include "types.h"
 #include <fstream>
 #include <sstream>
 inline bool loadAcceptanceCSV(const std::string& fname, Vec2D& dOmega)

@@ -178,7 +178,7 @@ void gold_cross_section(){
 
     // ── save and plot ─────────────────────────────────────────────────────────
     TFile *fout = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/output/cs_toy_gold.root",
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/output/cs_toy_gold_events_selection.root",
         "RECREATE");
 
     TCanvas *c = new TCanvas("c_gold", "Au-197 cross section", 900, 600);

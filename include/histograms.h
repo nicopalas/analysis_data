@@ -28,7 +28,7 @@ static void fillHistograms(
 
     double cos_theta_det, cos_theta;
     double tof1, tof0, neutron_energy;
-    double  amp0, amp1;
+    float  amp0, amp1;
     double x0,x1,y0,y1;
     double phi, phi_det;
     tree->SetBranchAddress("tof1",          &tof1);

@@ -21,9 +21,9 @@ void gold_analysis()
     // ================================================================
     // EFFICIENCY — coarse binning
     // ================================================================
-    const double emin = 100.;
+    const double emin = 40.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins_eff = {80, 300, 600, 1000};
+    const std::vector<double> energy_bins_eff = {40, 200, 500, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeGoldConfig(energy_bins_eff, "eff");
@@ -103,30 +103,24 @@ void gold_analysis()
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
-    TFile *solid_angle = TFile::Open("/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root", "READ");
-    TH2D* hist_theta_det = (TH2D*) solid_angle->Get("theta_det_beam");
-    std::vector<std::vector<double>> dOmega_eff(nbins_beam, std::vector<double>(nbins_det, 0.0));
-
-    for (int i = 1; i <= nbins_beam_fine; i++) {
-        for (int j = 1; j <= nbins_det_fine; j++) {
-            int i_rebin = (i - 1) / 2;
-            int j_rebin = (j - 1) / 2;
-        
-            if (i_rebin < nbins_beam && j_rebin < nbins_det) {
-                dOmega_eff[i_rebin][j_rebin] += hist_theta_det->GetBinContent(i, j);
-        }
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    Vec2D acceptance, dOmega_fine;
+    if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
+        std::cerr << "Failed to load acceptance CSV" << std::endl;
+        return;
     }
-}
-    solid_angle->Close();
+    acceptance = rebin(dOmega_fine);
 
     // --- efficiency ---
     std::vector<EfficiencyResult> eff(nbins_eff);
     for(int e = 0; e < nbins_eff; ++e)
         eff[e] = computeEfficiency(
+            nbins_det -1,
             nbins_beam,
             nbins_det,
             counts_signal_eff,
             u_counts_signal_eff,
+            acceptance,
             e);
 
     // --- save efficiency ---
@@ -158,13 +152,15 @@ void gold_analysis()
     plotBackgroundFits(hists_tof_eff, hists_sub_eff, fits_eff, nbins_eff,
                        outdir + "background_subtraction_gold_eff.pdf");
     plotEfficiency(eff, nbins_eff, nbins_det, energy_bins_eff,
-                   outdir + "efficiency_gold.pdf");
+               outdir + "efficiency_gold.pdf");
+    plotEfficiencyResolution(eff, nbins_eff, nbins_det, energy_bins_eff,
+                         outdir + "efficiency_resolution_gold.pdf");
 
     // ================================================================
-    // ANISOTROPY — 6 bins log entre 150 y 300 MeV
+    // ANISOTROPY — 5 bins log entre 40 y 300 MeV
     // ================================================================
-    const int nbins_aniso = 7;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 100.0, 1000.0);
+    const int nbins_aniso = 5;
+    std::vector<double> energy_bins_aniso = {40, 200, 290,  380, 550,  1000};
 
     AnalysisConfig cfg_aniso = makeGoldConfig(energy_bins_aniso, "aniso");
 
@@ -181,7 +177,7 @@ void gold_analysis()
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
         hists_tof_aniso[i] = new TH1D(
-            Form("htof_gold_aniso_%d", i), "", 100, -30, 30);
+            Form("htof_gold_aniso_%d", i), "", 100, -20, 20);
         hists_tof_aniso[i]->SetDirectory(0);
     }
 
@@ -246,7 +242,7 @@ void gold_analysis()
             nbins_beam, nbins_det,
             counts_signal_aniso,
             u_counts_signal_aniso,
-            dOmega_eff,
+            acceptance,
             e,
             eff[e_eff].eps,
             eff[e_eff].u_eps,
@@ -316,7 +312,7 @@ for (int e = 0; e < nbins_cs; ++e) {
         u_counts_signal_aniso,
         eff[e_eff].eps,
         eff[e_eff].u_eps,
-        dOmega_eff,
+        acceptance,
         e,
         E_low_cs,
         E_high_cs,

@@ -122,8 +122,8 @@ void gold_uranium_ratio(){
     // ── reference ratio at the anchor point: Au(46.3 MeV) / U(46.0 MeV) ────────
     // use the tabulated points directly (both are close to 46 MeV and already
     // exist explicitly in each table, so no interpolation needed)
-    double ref_au_46 = sig_ref_au[0];   // 46.3 MeV -> 6.1 mb entry
-    double ref_u_46  = sig_ref_u[73];   // 46.00 MeV -> 1.68089904 barn entry
+    double ref_au_46 = sig_ref_au[2];   // 46.3 MeV -> 6.1 mb entry
+    double ref_u_46  = sig_ref_u[84];   // 46.00 MeV -> 1.68089904 barn entry
     double ref_ratio_46 = ref_au_46 / ref_u_46;
 
     printf("Reference anchor: sigma_Au(46.3 MeV)=%.4e barn, sigma_U(46.0 MeV)=%.4e barn, ref_ratio=%.4e\n",
@@ -135,7 +135,7 @@ void gold_uranium_ratio(){
     for (int e = 1; e <= nbins; ++e) {
         if (h_ratio_raw->GetBinContent(e) <= 0.0) continue;
         double Ec = h_ratio_raw->GetBinCenter(e);
-        double dE = std::fabs(Ec - 46.0);
+        double dE = std::fabs(Ec - 73.9);
         if (dE < best_dE) { best_dE = dE; best_bin = e; }
     }
     if (best_bin < 0) { std::cerr << "No valid experimental ratio bin found near 46 MeV\n"; return; }

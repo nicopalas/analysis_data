@@ -14,7 +14,7 @@ struct AnalysisConfig {
 
     std::string efficiency_file;
     std::vector<double> energy_bins_eff;
-    double cos_det_cut = 0.5;
+    double cos_det_cut = 0.6;
     int    bins_beam  = 20;
     int    bins_det   = 20;
     int    n_toys      = 500;   
@@ -32,10 +32,10 @@ static AnalysisConfig makeUraniumConfig(
     AnalysisConfig c;
     c.sample          = Sample::uranium;
     c.tree_name       = "events_uranium";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
-    c.efficiency_file = "output_efficiency_uranium.root";
+    c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/output_efficiency_uranium.root";
     c.energy_bins_eff = {1, 10, 100, 500, 1000};
     c.atoms = 5.04e17;
     return c;
@@ -48,11 +48,11 @@ static AnalysisConfig makeGoldConfig(
     AnalysisConfig c;
     c.sample          = Sample::gold;
     c.tree_name       = "events_gold";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
-    c.efficiency_file = "output_efficiency_gold.root";
-    c.energy_bins_eff = {100, 300, 600, 1000};
+    c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/output_efficiency_gold.root";
+    c.energy_bins_eff = {40, 300, 600, 1000};
     c.atoms = 9.17e17;
     return c;
 }

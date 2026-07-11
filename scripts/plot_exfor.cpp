@@ -96,9 +96,9 @@ TGraphErrors* load_cs_this_work()
 
 TGraphErrors* load_aniso_this_work()
 {
-    TFile* fa = TFile::Open("/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/anisotropy_ratio_uranium_complete.root");
+    TFile* fa = TFile::Open("/Users/nico/Desktop/Tese/Analysis/cross_section/anisotropy_u.root");
     if (!fa || fa->IsZombie()) { std::cerr << "[ERROR] Cannot open anisotropy file\n"; return nullptr; }
-    TGraphErrors* g = (TGraphErrors*)fa->Get("anisotropy_ratio")->Clone();
+    TGraphErrors* g = (TGraphErrors*)fa->Get("anisotropy_ratio_0_90_vs_E")->Clone();
     fa->Close();
     g->SetMarkerStyle(21); g->SetMarkerSize(0.7);
     g->SetMarkerColor(kRed+1); g->SetLineColor(kRed+1);

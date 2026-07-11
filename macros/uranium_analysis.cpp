@@ -96,40 +96,25 @@ void uranium_analysis(){
                   cs_upeak_eff,   u_cs_upeak_eff,
                   counts_signal_eff, u_counts_signal_eff);
 
-    // --- acceptance ---
-    TFile *solid_angle = TFile::Open("/Users/nico/Desktop/Tese/Analysis/mc_acceptance.root", "READ");
-    TH2D* hist_theta_det = (TH2D*) solid_angle->Get("theta_det_beam");
-    std::vector<std::vector<double>> dOmega_eff(nbins_beam, std::vector<double>(nbins_det, 0.0));
-    double sum_solid = 0.0;
-
-    for (int i = 1; i <= nbins_beam_fine; i++) {
-        for (int j = 1; j <= nbins_det_fine; j++) {
-            int i_rebin = (i - 1) / 2;
-            int j_rebin = (j - 1) / 2;
-        
-            if (i_rebin < nbins_beam && j_rebin < nbins_det) {
-                dOmega_eff[i_rebin][j_rebin] += hist_theta_det->GetBinContent(i, j);
-                sum_solid+=hist_theta_det->GetBinContent(i, j);
-        }
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    Vec2D acceptance, dOmega_fine;
+    if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
+        std::cerr << "Failed to load acceptance CSV" << std::endl;
+        return;
     }
-}
-    for (int i = 0 ; i<nbins_det; i++){
-        for (int j = 0; j<nbins_beam; j++){
-            dOmega_eff[j][i]/=sum_solid;
-            std::cout << "dOMega bin_det = " << i << ", bin_beam = " << j << " = " << dOmega_eff[j][i] << std::endl;
-        }
-    }
-    
-    solid_angle->Close();
+    acceptance = rebin(dOmega_fine);
     // --- efficiency ---
     std::vector<EfficiencyResult> eff(nbins_eff);
-    for(int e = 0; e < nbins_eff; ++e)
+    for(int e = 0; e < nbins_eff; ++e){
         eff[e] = computeEfficiency(
+            nbins_det-1,
             nbins_beam,
             nbins_det,
             counts_signal_eff,
             u_counts_signal_eff,
+            acceptance,
             e);
+        }
 
     // --- save efficiency ---
     TFile* fout_eff = TFile::Open(
@@ -161,12 +146,14 @@ void uranium_analysis(){
                        outdir + "background_subtraction_uranium_eff.pdf");
     plotEfficiency(eff, nbins_eff, nbins_det, energy_bins_eff,
                    outdir + "efficiency_uranium.pdf");
+    plotEfficiencyResolution(eff, nbins_eff, nbins_det, energy_bins_eff,
+                    outdir + "efficiency_resolution_uranium.pdf");
 
     // ================================================================
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
-    const int nbins_aniso = 35;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.0, 1000.0);
+    const int nbins_aniso = 40;
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.1, 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 
@@ -179,7 +166,7 @@ void uranium_analysis(){
 
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
-        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 100, -15, 15);
+        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 100, -20, 20);
         hists_tof_aniso[i]->SetDirectory(0);
     }
 
@@ -244,7 +231,7 @@ for(int i = 0; i < nbins_aniso; ++i){
             nbins_beam, nbins_det,
             counts_signal_aniso,
             u_counts_signal_aniso,
-            dOmega_eff,
+            acceptance,
             e,
             eff[e_eff].eps,
             eff[e_eff].u_eps,
@@ -294,6 +281,22 @@ for(int i = 0; i < nbins_aniso; ++i){
                    outdir + "anisotropy_uranium_complete.pdf");
     plotAnisotropyRatio(aniso, nbins_aniso, nbins_beam, energy_bins_aniso,
                         outdir + "anisotropy_ratio_uranium_complete");
+    std::vector<ExforSource> sources = {
+    {"/Users/nico/Downloads/13709003.csv"},
+    {"/Users/nico/Downloads/14660003 (1).csv"},
+    {"/Users/nico/Downloads/41756002 (2).csv"}
+    // omitir "label" -> se autogenera desde author1/year1/DatasetID del propio CSV
+};
+    TFile* fin_ratio = TFile::Open(
+    (outdir + "anisotropy_ratio_uranium_complete.root").c_str());
+    TGraphErrors *g = fin_ratio ? fin_ratio->Get<TGraphErrors>("anisotropy_ratio") : nullptr;
+    plotAnisoVsExfor(g, sources,
+                 outdir + "aniso_vs_exfor.pdf");
+
+    plotAnisoVsExforIndividual(g, sources,
+                           outdir + "aniso_vs_exfor_grid.pdf");
+    plotPullsVsExfor(g, sources, outdir + "pulls_vs_exfor_grid.pdf");
+    plotPullsOverlay(g, sources, outdir + "pulls_vs_exfor_overlay.pdf");
     fout_aniso->Close();
 
 
@@ -325,7 +328,7 @@ for (int e = 0; e < nbins_cs; ++e) {
         nbins_beam, nbins_det,
         counts_signal_aniso,      u_counts_signal_aniso,
         eff[e_eff].eps,           eff[e_eff].u_eps,
-        dOmega_eff,
+        acceptance,
         e,
         E_low_cs, E_high_cs,
         cfg_aniso.atoms,
@@ -341,20 +344,6 @@ for (int e = 0; e < nbins_cs; ++e) {
     for (int j = 0; j < nbins_beam; ++j)
         for (int ii = 0; ii < nbins_det; ++ii)
             total_signal += counts_signal_aniso[e][j][ii];
-    std::cout << "ebin " << e
-              << "  E="          << Ec           << " MeV"
-              << "  signal_sum=" << total_signal
-              << "  sigma="      << cs_abs[e].sigma
-              << " +/- "         << cs_abs[e].u_sigma << " barn\n";
-}
-for (int e = 0; e < nbins_eff; ++e){
-    double Ec = std::sqrt(energy_bins_eff[e] * energy_bins_eff[e+1]);
-    std::cout << "eff[" << e << "]  Ec=" << Ec << " MeV\n";
-    for (int i = 0; i < nbins_det; ++i){
-        std::cout << "  det " << i
-                  << "  eps=" << eff[e].eps[i]
-                  << " +/- "  << eff[e].u_eps[i] << "\n";
-    }
 }
 // --- save cross section ---
 TFile* fout_cs = TFile::Open(

@@ -224,11 +224,6 @@ static CrossSection cross_section_absolute(
             double rel2 = (uc * uc) / (c * c) + (ue * ue) / (e * e);
             u2_counts += contrib * contrib * rel2;
 
-            printf("  ebin=%d j=%d ii=%d | c=%.4f+/-%.4f (rel=%.4f) | e=%.6f+/-%.6f (rel=%.4f) | contrib=%.4e +/- %.4e\n",
-                ebin, j, ii,
-                c, uc, uc/c,
-                e, ue, ue/e,
-                contrib, contrib * std::sqrt(rel2));
         }
     }
 
@@ -241,11 +236,6 @@ static CrossSection cross_section_absolute(
                       + (u_Phi * u_Phi) / (Phi * Phi);
     result.u_sigma = result.sigma * std::sqrt(rel2_total);
 
-    printf("ebin=%d | sum_counts=%.6e +/- %.6e (rel=%.4f) | Phi=%.6e +/- %.6e (rel=%.4f) | sigma=%.6e +/- %.6e (rel=%.4f)\n",
-        ebin,
-        sum_counts, std::sqrt(u2_counts), std::sqrt(u2_counts) / sum_counts,
-        Phi, u_Phi, u_Phi / Phi,
-        result.sigma, result.u_sigma, result.u_sigma / result.sigma);
 
     return result;
 }
@@ -280,9 +270,6 @@ void normalised_xs(TH1D* cross_section, double xmin, double xmax, double integra
     for (int i = 1; i <= normalised_histo->GetNbinsX(); i++){
     normalised_histo->SetBinContent(i, normalised_histo->GetBinContent(i) * scale_9MeV);
     normalised_histo->SetBinError  (i, normalised_histo->GetBinError(i)   * scale_9MeV);
-    std::cout << "E=" << normalised_histo->GetBinCenter(i) << " MeV"
-              << "  sigma=" << normalised_histo->GetBinContent(i) << " barn"
-              << " +/- "    << normalised_histo->GetBinError(i)   << " barn\n";
 }
 
     std::cout << "Value at 9 MeV after  = "

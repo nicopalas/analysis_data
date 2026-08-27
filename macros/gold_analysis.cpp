@@ -23,7 +23,7 @@ void gold_analysis()
     // ================================================================
     const double emin = 40.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins_eff = {40, 200, 500, 1000};
+    const std::vector<double> energy_bins_eff = {40, 300, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeGoldConfig(energy_bins_eff, "eff");
@@ -46,7 +46,7 @@ void gold_analysis()
     std::vector<TH1D*> hists_tof_eff(nbins_eff, nullptr);
     for(int i = 0; i < nbins_eff; ++i){
         hists_tof_eff[i] = new TH1D(
-            Form("htof_gold_eff_%d", i), "", 100, -20, 20);
+            Form("htof_gold_eff_%d", i), "", 100, -15, 15);
         hists_tof_eff[i]->SetDirectory(0);
     }
 
@@ -103,7 +103,7 @@ void gold_analysis()
                   counts_signal_eff, u_counts_signal_eff);
 
     // --- acceptance ---
-    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/acceptance_coincidence.csv";
     Vec2D acceptance, dOmega_fine;
     if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
         std::cerr << "Failed to load acceptance CSV" << std::endl;
@@ -160,7 +160,7 @@ void gold_analysis()
     // ANISOTROPY — 5 bins log entre 40 y 300 MeV
     // ================================================================
     const int nbins_aniso = 5;
-    std::vector<double> energy_bins_aniso = {40, 200, 290,  380, 550,  1000};
+    std::vector<double> energy_bins_aniso = {40, 180, 350, 450, 700, 1000};
 
     AnalysisConfig cfg_aniso = makeGoldConfig(energy_bins_aniso, "aniso");
 

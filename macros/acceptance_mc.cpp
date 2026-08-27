@@ -31,12 +31,25 @@
 // Geometry from create_ntof_geo.C:
 //   target  TGeoEltu semi-axes (7.8*sqrt2/2, 7.8/2) cm, U thickness 0.411e-4 cm
 //   PPAC    TGeoBBox half-size 10 x 10 cm, gas_gap 0.32, mylar 1.7e-4
+//
+// TRUE-vs-RECONSTRUCTED ANGLE CHECK
+// ----------------------------------
+// dfx,dfy,dfz is the TRUE emission direction, already expressed in the
+// detector frame (by construction dfz = cth). The reconstructed direction
+// (dx,dy,dz -> cos_theta_det, cos_theta) instead comes from the cathode
+// intersection points (xf,yf) and (xb,yb), i.e. it carries the effect of
+// the finite gap between the two cathode planes of each PPAC. Comparing
+// the two isolates that reconstruction bias from the true angular
+// distribution, in both the detector frame and the beam frame.
 
 #include "TRandom3.h"
 #include "TFile.h"
 #include "TH1D.h"
 #include "TH2D.h"
 #include "TMath.h"
+#include "TCanvas.h"
+#include "TLegend.h"
+#include "TStyle.h"
 #include <vector>
 #include <fstream>
 #include <iomanip>
@@ -65,15 +78,17 @@ void acceptance_mc()
     const double z_back  = -2.5,  x_back  = +2.5;
     // (empirical values from the data alignment: -2.355 / +2.340)
 
-    // Cathode planes.  The forward fragment travels in +z_det and meets the
-    // low-z layer of the front PPAC first (cathode_y), then cathode_x.
-    // The backward fragment travels in -z_det and meets the HIGH-z layer of
-    // the back PPAC first, i.e. cathode_x, then cathode_y -- the PPACs are all
-    // added with the same rotation, so the back one is not flipped.
-    const double zf_first  = z_front - cath_off;   // front cathode_y
-    const double zf_second = z_front + cath_off;   // front cathode_x
-    const double zb_first  = z_back  + cath_off;   // back  cathode_x
-    const double zb_second = z_back  - cath_off;   // back  cathode_y
+    // Cathode planes.  Real internal layout per PPAC is X, anode, Y (in that
+    // order along the PPAC normal). The forward fragment travels in +z_det
+    // and meets the low-z layer of the front PPAC first (cathode X), then
+    // cathode Y. The backward fragment travels in -z_det and meets the
+    // HIGH-z layer of the back PPAC first, i.e. cathode Y, then cathode X --
+    // the PPACs are all added with the same rotation, so the back one is
+    // not flipped.
+    const double zf_first  = z_front - cath_off;   // front cathode_x
+    const double zf_second = z_front + cath_off;   // front cathode_y
+    const double zb_first  = z_back  + cath_off;   // back  cathode_y
+    const double zb_second = z_back  - cath_off;   // back  cathode_x
 
     const int    nbins_beam = 100;          // matches cos_theta_center in the CSV
     const int    nbins_det  = 20;           // matches cos_theta_det_center
@@ -109,6 +124,50 @@ void acceptance_mc()
     TH1D* hist_x_back  = new TH1D("x_back",  ";x_{back} (cm)",  200, -20, 20);
     TH1D* hist_y_back  = new TH1D("y_back",  ";y_{back} (cm)",  200, -20, 20);
 
+    // ── NEW: true vs reconstructed angle check ────────────────────────────
+    // Beam frame and detector frame, each with:
+    //   - a 1D "true" and "reconstructed" angle distribution (deg), overlaid
+    //   - a 2D (theta_true, theta_reco - theta_true) correlation
+    const int    nbins_theta   = 1000;
+    const double dtheta_range  = 15.0;   // deg; widen if the 2D map overflows
+
+    TH1D* hist_theta_true_beam = new TH1D("theta_true_beam",
+        ";#theta_{beam} (deg);counts", nbins_theta, 0, 90);
+    TH1D* hist_theta_reco_beam = new TH1D("theta_reco_beam",
+        ";#theta_{beam} (deg);counts", nbins_theta, 0, 90);
+    TH1D* hist_theta_true_det  = new TH1D("theta_true_det",
+        ";#theta_{det} (deg);counts",  nbins_theta, 0, 90);
+    TH1D* hist_theta_reco_det  = new TH1D("theta_reco_det",
+        ";#theta_{det} (deg);counts",  nbins_theta, 0, 90);
+
+    TH2D* hist_dtheta_vs_theta_beam = new TH2D("dtheta_vs_theta_beam",
+        ";#theta_{true,beam} (deg);#theta_{reco}-#theta_{true} (deg)",
+        nbins_theta, 0, 90, 120, -dtheta_range, dtheta_range);
+    TH2D* hist_dtheta_vs_theta_det = new TH2D("dtheta_vs_theta_det",
+        ";#theta_{true,det} (deg);#theta_{reco}-#theta_{true} (deg)",
+        nbins_theta, 0, 90, 120, -dtheta_range, dtheta_range);
+
+    // same check, but in cos(theta) instead of theta (deg) -- same events,
+    // same true/reco quantities, just the other common variable
+    const int    nbins_costheta  = 100;
+    const double dcostheta_range = 0.05;   // widen if the 2D map overflows
+
+    TH1D* hist_costheta_true_beam = new TH1D("costheta_true_beam",
+        ";cos#theta_{beam};counts", nbins_costheta, 0, 1);
+    TH1D* hist_costheta_reco_beam = new TH1D("costheta_reco_beam",
+        ";cos#theta_{beam};counts", nbins_costheta, 0, 1);
+    TH1D* hist_costheta_true_det  = new TH1D("costheta_true_det",
+        ";cos#theta_{det};counts",  nbins_costheta, 0, 1);
+    TH1D* hist_costheta_reco_det  = new TH1D("costheta_reco_det",
+        ";cos#theta_{det};counts",  nbins_costheta, 0, 1);
+
+    TH2D* hist_dcostheta_vs_costheta_beam = new TH2D("dcostheta_vs_costheta_beam",
+        ";cos#theta_{true,beam};cos#theta_{reco}-cos#theta_{true}",
+        nbins_costheta, 0, 1, 120, -dcostheta_range, dcostheta_range);
+    TH2D* hist_dcostheta_vs_costheta_det = new TH2D("dcostheta_vs_costheta_det",
+        ";cos#theta_{true,det};cos#theta_{reco}-cos#theta_{true}",
+        nbins_costheta, 0, 1, 120, -dcostheta_range, dcostheta_range);
+
     // ── event loop ─────────────────────────────────────────────────────────
     for (Long64_t i = 0; i < nevents; ++i) {
 
@@ -132,6 +191,13 @@ void acceptance_mc()
         const double dfz = cth;
 
         if (dfz <= 0.) continue;            // parallel to the planes
+
+        // TRUE emission direction, mapped to the beam frame with the same
+        // R_y(45) rotation used below for the reconstructed direction.
+        // (dfx,dfy,dfz) is already a unit vector in the detector frame, so
+        // no renormalisation is needed here.
+        const double cos_theta_true_beam = (-dfx + dfz) * inv_sqrt2;
+        // cos_theta_true_det is just dfz == cth, already at hand.
 
         // intersection of a ray from (ox,oy,oz) with the plane z = zp
         auto cross = [&](double zp, double vx, double vy, double vz,
@@ -166,9 +232,13 @@ void acceptance_mc()
 
         if (!okf1 || !okf2 || !okb1 || !okb2) continue;
 
-        // measured point per PPAC: midpoint of the crossing (both cathodes)
-        const double xf = 0.5*(xf1 + xf2), yf = 0.5*(yf1 + yf2);
-        const double xb = 0.5*(xb1 + xb2), yb = 0.5*(yb1 + yb2);
+        // measured point per PPAC: each coordinate comes from its OWN cathode
+        // plane, not an average of both. Real layout per PPAC is X, anode, Y,
+        // so the forward-going fragment meets the X plane first, then Y.
+        //   front (going +z): X @ zf_first -> xf1 ; Y @ zf_second -> yf2
+        //   back  (going -z): Y @ zb_first -> yb1 ; X @ zb_second -> xb2
+        const double xf = xf1, yf = yf2;
+        const double xb = xb2, yb = yb1;
 
         // diagnostic: single-plane-per-PPAC test, for comparison
         double xfm, yfm, xbm, ybm;
@@ -229,6 +299,41 @@ void acceptance_mc()
             hist_y_back->Fill(yb);
             eff_beam->Fill(cos_theta, phi);
             eff_det->Fill(cos_theta_det, phi_det*TMath::RadToDeg());
+
+            // ── true vs reconstructed angle, only where we have a full
+            //    coincidence (i.e. an actual reconstructed point pair) ──────
+            const double theta_true_beam_deg =
+                TMath::ACos(TMath::Abs(cos_theta_true_beam)) * TMath::RadToDeg();
+            const double theta_reco_beam_deg =
+                TMath::ACos(TMath::Abs(cos_theta))            * TMath::RadToDeg();
+            const double theta_true_det_deg  = TMath::ACos(cth)           * TMath::RadToDeg();
+            const double theta_reco_det_deg  = TMath::ACos(cos_theta_det) * TMath::RadToDeg();
+
+            hist_theta_true_beam->Fill(theta_true_beam_deg);
+            hist_theta_reco_beam->Fill(theta_reco_beam_deg);
+            hist_theta_true_det->Fill(theta_true_det_deg);
+            hist_theta_reco_det->Fill(theta_reco_det_deg);
+
+            hist_dtheta_vs_theta_beam->Fill(theta_true_beam_deg,
+                                             theta_reco_beam_deg - theta_true_beam_deg);
+            hist_dtheta_vs_theta_det->Fill(theta_true_det_deg,
+                                            theta_reco_det_deg  - theta_true_det_deg);
+
+            // ── same check in cos(theta) instead of theta (deg) ─────────────
+            const double costheta_true_beam = TMath::Abs(cos_theta_true_beam);
+            const double costheta_reco_beam = TMath::Abs(cos_theta);
+            const double costheta_true_det  = cth;            // already in [0,1]
+            const double costheta_reco_det  = cos_theta_det;   // already in [0,1]
+
+            hist_costheta_true_beam->Fill(costheta_true_beam);
+            hist_costheta_reco_beam->Fill(costheta_reco_beam);
+            hist_costheta_true_det->Fill(costheta_true_det);
+            hist_costheta_reco_det->Fill(costheta_reco_det);
+
+            hist_dcostheta_vs_costheta_beam->Fill(costheta_true_beam,
+                                                   costheta_reco_beam - costheta_true_beam);
+            hist_dcostheta_vs_costheta_det->Fill(costheta_true_det,
+                                                  costheta_reco_det  - costheta_true_det);
         }
     }
 
@@ -245,6 +350,18 @@ void acceptance_mc()
               << (coinc_midplane > 0
                   ? 100.*lost_2cathode/double(coinc_midplane) : 0.)
               << " % of single-plane coincidences)\n"
+              << "\n  <theta_reco - theta_true> (beam) = "
+              << hist_dtheta_vs_theta_beam->GetMean(2) << " deg,  RMS = "
+              << hist_dtheta_vs_theta_beam->GetRMS(2)  << " deg\n"
+              << "  <theta_reco - theta_true> (det)  = "
+              << hist_dtheta_vs_theta_det->GetMean(2)  << " deg,  RMS = "
+              << hist_dtheta_vs_theta_det->GetRMS(2)   << " deg\n"
+              << "\n  <costheta_reco - costheta_true> (beam) = "
+              << hist_dcostheta_vs_costheta_beam->GetMean(2) << ",  RMS = "
+              << hist_dcostheta_vs_costheta_beam->GetRMS(2)  << "\n"
+              << "  <costheta_reco - costheta_true> (det)  = "
+              << hist_dcostheta_vs_costheta_det->GetMean(2)  << ",  RMS = "
+              << hist_dcostheta_vs_costheta_det->GetRMS(2)   << "\n"
               << std::endl;
 
     // ── CSV, same format as acceptance_coincidence.csv ─────────────────────
@@ -304,6 +421,153 @@ void acceptance_mc()
     hist_cos_theta->Write();
     hist_cos_theta_emitted->Write();
 
+    // ── NEW: write the true-vs-reconstructed angle histograms ──────────────
+    hist_theta_true_beam->Write();
+    hist_theta_reco_beam->Write();
+    hist_theta_true_det->Write();
+    hist_theta_reco_det->Write();
+    hist_dtheta_vs_theta_beam->Write();
+    hist_dtheta_vs_theta_det->Write();
+
+    // ── NEW: canvas with correlation + overlaid distributions, both frames ─
+    gStyle->SetOptStat(1111);
+    gStyle->SetPalette(kBird);
+
+    TCanvas* c_angle_check = new TCanvas("c_angle_check",
+                                          "true vs reconstructed angle", 1200, 900);
+    c_angle_check->Divide(2, 2);
+
+    c_angle_check->cd(1);
+    hist_dtheta_vs_theta_beam->SetTitle("beam frame: reco-true vs true");
+    hist_dtheta_vs_theta_beam->Draw("COLZ");
+
+    c_angle_check->cd(2);
+    hist_theta_true_beam->SetLineColor(kBlue+1);
+    hist_theta_true_beam->SetLineWidth(3);
+    hist_theta_true_beam->SetLineStyle(1);
+    hist_theta_reco_beam->SetLineColor(kRed+1);
+    hist_theta_reco_beam->SetLineWidth(2);
+    hist_theta_reco_beam->SetLineStyle(2);
+    hist_theta_true_beam->SetTitle("beam frame: true vs reconstructed");
+    hist_theta_true_beam->SetStats(0);
+    hist_theta_reco_beam->SetStats(0);
+    {
+        const double ymax = 1.1 * TMath::Max(hist_theta_true_beam->GetMaximum(),
+                                              hist_theta_reco_beam->GetMaximum());
+        hist_theta_true_beam->SetMaximum(ymax);
+    }
+    hist_theta_true_beam->Draw("HIST");
+    hist_theta_reco_beam->Draw("HIST SAME");
+    TLegend* leg_beam = new TLegend(0.60, 0.75, 0.88, 0.88);
+    leg_beam->SetBorderSize(0);
+    leg_beam->AddEntry(hist_theta_true_beam, "true", "l");
+    leg_beam->AddEntry(hist_theta_reco_beam, "reconstructed", "l");
+    leg_beam->Draw();
+
+    c_angle_check->cd(3);
+    hist_dtheta_vs_theta_det->SetTitle("detector frame: reco-true vs true");
+    hist_dtheta_vs_theta_det->Draw("COLZ");
+
+    c_angle_check->cd(4);
+    hist_theta_true_det->SetLineColor(kBlue+1);
+    hist_theta_true_det->SetLineWidth(3);
+    hist_theta_true_det->SetLineStyle(1);
+    hist_theta_reco_det->SetLineColor(kRed+1);
+    hist_theta_reco_det->SetLineWidth(2);
+    hist_theta_reco_det->SetLineStyle(2);
+    hist_theta_true_det->SetTitle("detector frame: true vs reconstructed");
+    hist_theta_true_det->SetStats(0);
+    hist_theta_reco_det->SetStats(0);
+    {
+        const double ymax = 1.1 * TMath::Max(hist_theta_true_det->GetMaximum(),
+                                              hist_theta_reco_det->GetMaximum());
+        hist_theta_true_det->SetMaximum(ymax);
+    }
+    hist_theta_true_det->Draw("HIST");
+    hist_theta_reco_det->Draw("HIST SAME");
+    TLegend* leg_det = new TLegend(0.60, 0.75, 0.88, 0.88);
+    leg_det->SetBorderSize(0);
+    leg_det->AddEntry(hist_theta_true_det, "true", "l");
+    leg_det->AddEntry(hist_theta_reco_det, "reconstructed", "l");
+    leg_det->Draw();
+
+    c_angle_check->Write();
+    c_angle_check->SaveAs("angle_true_vs_reco.png");
+    c_angle_check->SaveAs("angle_true_vs_reco.pdf");
+
+    // ── NEW: write the true-vs-reconstructed cos(theta) histograms ─────────
+    hist_costheta_true_beam->Write();
+    hist_costheta_reco_beam->Write();
+    hist_costheta_true_det->Write();
+    hist_costheta_reco_det->Write();
+    hist_dcostheta_vs_costheta_beam->Write();
+    hist_dcostheta_vs_costheta_det->Write();
+
+    // ── NEW: same 2x2 canvas layout, but in cos(theta) ──────────────────────
+    TCanvas* c_costheta_check = new TCanvas("c_costheta_check",
+                                             "true vs reconstructed cos(theta)", 1200, 900);
+    c_costheta_check->Divide(2, 2);
+
+    c_costheta_check->cd(1);
+    hist_dcostheta_vs_costheta_beam->SetTitle("beam frame: reco-true vs true");
+    hist_dcostheta_vs_costheta_beam->Draw("COLZ");
+
+    c_costheta_check->cd(2);
+    hist_costheta_true_beam->SetLineColor(kBlue+1);
+    hist_costheta_true_beam->SetLineWidth(3);
+    hist_costheta_true_beam->SetLineStyle(1);
+    hist_costheta_reco_beam->SetLineColor(kRed+1);
+    hist_costheta_reco_beam->SetLineWidth(2);
+    hist_costheta_reco_beam->SetLineStyle(2);
+    hist_costheta_true_beam->SetTitle("beam frame: true vs reconstructed");
+    hist_costheta_true_beam->SetStats(0);
+    hist_costheta_reco_beam->SetStats(0);
+    {
+        const double ymax = 1.1 * TMath::Max(hist_costheta_true_beam->GetMaximum(),
+                                              hist_costheta_reco_beam->GetMaximum());
+        hist_costheta_true_beam->SetMaximum(ymax);
+    }
+    hist_costheta_true_beam->Draw("HIST");
+    hist_costheta_reco_beam->Draw("HIST SAME");
+    TLegend* leg_costheta_beam = new TLegend(0.60, 0.75, 0.88, 0.88);
+    leg_costheta_beam->SetBorderSize(0);
+    leg_costheta_beam->AddEntry(hist_costheta_true_beam, "true", "l");
+    leg_costheta_beam->AddEntry(hist_costheta_reco_beam, "reconstructed", "l");
+    leg_costheta_beam->Draw();
+
+    c_costheta_check->cd(3);
+    hist_dcostheta_vs_costheta_det->SetTitle("detector frame: reco-true vs true");
+    hist_dcostheta_vs_costheta_det->Draw("COLZ");
+
+    c_costheta_check->cd(4);
+    hist_costheta_true_det->SetLineColor(kBlue+1);
+    hist_costheta_true_det->SetLineWidth(3);
+    hist_costheta_true_det->SetLineStyle(1);
+    hist_costheta_reco_det->SetLineColor(kRed+1);
+    hist_costheta_reco_det->SetLineWidth(2);
+    hist_costheta_reco_det->SetLineStyle(2);
+    hist_costheta_true_det->SetTitle("detector frame: true vs reconstructed");
+    hist_costheta_true_det->SetStats(0);
+    hist_costheta_reco_det->SetStats(0);
+    {
+        const double ymax = 1.1 * TMath::Max(hist_costheta_true_det->GetMaximum(),
+                                              hist_costheta_reco_det->GetMaximum());
+        hist_costheta_true_det->SetMaximum(ymax);
+    }
+    hist_costheta_true_det->Draw("HIST");
+    hist_costheta_reco_det->Draw("HIST SAME");
+    TLegend* leg_costheta_det = new TLegend(0.60, 0.75, 0.88, 0.88);
+    leg_costheta_det->SetBorderSize(0);
+    leg_costheta_det->AddEntry(hist_costheta_true_det, "true", "l");
+    leg_costheta_det->AddEntry(hist_costheta_reco_det, "reconstructed", "l");
+    leg_costheta_det->Draw();
+
+    c_costheta_check->Write();
+    c_costheta_check->SaveAs("costheta_true_vs_reco.png");
+    c_costheta_check->SaveAs("costheta_true_vs_reco.pdf");
+
     fout->Close();
     std::cout << "wrote mc_acceptance.root\n";
+    std::cout << "wrote angle_true_vs_reco.png / .pdf\n";
+    std::cout << "wrote costheta_true_vs_reco.png / .pdf\n";
 }

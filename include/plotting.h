@@ -152,6 +152,10 @@ static void plotBackgroundFits(
         hists_sub[i]->GetXaxis()->SetTitleOffset(1.1);
         hists_sub[i]->GetYaxis()->SetTitleOffset(1.4);
         hists_sub[i]->Draw("PE");
+        hists_sub[i]->GetXaxis()->SetLabelSize(0.06);
+        hists_sub[i]->GetXaxis()->SetTitleSize(0.06);
+        hists_sub[i]->GetYaxis()->SetLabelSize(0.06);
+        hists_sub[i]->GetYaxis()->SetTitleSize(0.06);
 
         TLine* zero = new TLine(hists_sub[i]->GetXaxis()->GetXmin(), 0.0,
                                 hists_sub[i]->GetXaxis()->GetXmax(), 0.0);
@@ -207,9 +211,9 @@ static void plotEfficiency(
             gr->GetYaxis()->SetTitleOffset(1.4);
             gr->SetMinimum(0.0);
             gr->SetMaximum(1.25);
-            gr->Draw("ALP");
+            gr->Draw("AP");
         } else {
-            gr->Draw("LP SAME");
+            gr->Draw("P SAME");
         }
         leg->AddEntry(gr,
             Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]), "lp");
@@ -332,7 +336,7 @@ static void plotAnisotropy(
             nbins_beam, x.data(), y.data(), ex.data(), aniso[e].u_w.data());
 
         g->SetMarkerStyle(20);
-        g->SetMarkerSize(0.5);
+        g->SetMarkerSize(.6);
         g->SetMarkerColor(kAnisoColor);
         g->SetLineColor(kAnisoColor);
         g->SetLineWidth(2);
@@ -654,7 +658,7 @@ static void plotAnisoVsExfor(
     TGraphErrors* g_this,
     const std::vector<ExforSource>& sources,
     const std::string& outname,
-    double xmin = 1.0, double xmax = 1000.0)
+    double xmin = 1.0, double xmax = 2000.0)
 {
     setPubStyle();
 
@@ -806,7 +810,7 @@ static void plotPullsVsExfor(
     TGraphErrors* g_this,
     const std::vector<ExforSource>& sources,
     const std::string& outname,
-    double xmin = 1.1, double xmax = 1000.0)
+    double xmin = 1.1, double xmax = 2000.0)
 {
     setPubStyle();
  
@@ -892,7 +896,7 @@ static void plotPullsOverlay(
     TGraphErrors* g_this,
     const std::vector<ExforSource>& sources,
     const std::string& outname,
-    double xmin = 1.1, double xmax = 1000.0)
+    double xmin = 1.1, double xmax = 2000.0)
 {
     setPubStyle();
  

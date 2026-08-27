@@ -46,7 +46,7 @@ void DrawTag(double x, double y, const char* label, double size = 0.045){
     lx->SetNDC();
     lx->SetTextFont(42);
     lx->SetTextSize(size);
-    lx->DrawLatex(x, y, Form("#font[62]{Gold} #font[52]{Preliminary}  %s", label));
+    lx->DrawLatex(x, y, Form("#font[62]{U^{238}} %s", label));
 }
 
 void efficiency_toy(){
@@ -63,15 +63,15 @@ void efficiency_toy(){
 
     // ===== CARGAR DATOS =====
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*)fin->Get("events_gold");
     if (!tin) { std::cerr << "Tree not found\n"; return; }
-
     TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold.root", "READ");
     if (!fcut1 || fcut1->IsZombie()) { std::cerr << "Cannot open cut1 file\n"; return; }
     TCutG *cut1 = (TCutG*)fcut1->Get("cut1");
     TCutG *cut2 = (TCutG*)fcut1->Get("cut2");
+    //TCutG *cut3 = (TCutG*)fcut1->Get("cut3");
     if (!cut1 || !cut2) { std::cerr << "TCutG cut1/cut2 not found\n"; return; }
 
     std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
@@ -82,8 +82,8 @@ void efficiency_toy(){
     }
     acceptance = rebin(dOmega_fine);
 
-    const int nbins = 3;
-    std::vector<double> energy_bins = {40, 200, 500, 1000};
+    const int nbins = 4;
+    std::vector<double> energy_bins = {40, 200, 400, 700, 1000};
     std::vector<double> E_low(nbins), E_high(nbins);
     for (int e = 0; e < nbins; ++e) {
         E_low[e]  = energy_bins[e];
@@ -92,7 +92,7 @@ void efficiency_toy(){
 
     // ===== EVENT LOOP =====
     double tof1, tof0, neutron_energy;
-    float amp0, amp1;
+    double amp0, amp1;
     double cos_theta, cos_theta_det;
     tin->SetBranchAddress("tof1", &tof1);
     tin->SetBranchAddress("tof0", &tof0);
@@ -110,14 +110,14 @@ void efficiency_toy(){
         tin->GetEntry(i);
         double dt = tof1 - tof0;
         if (std::fabs(cos_theta) > 1 || std::fabs(cos_theta_det) > 1) continue;
-        if (neutron_energy < 1.0 || neutron_energy > 1000.0) continue;
+        if (neutron_energy < 40.0 || neutron_energy > 1000.0) continue;
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
         int bin_beam = int(std::fabs(cos_theta) / dcos_beam);
         int bin_det = int(std::fabs(cos_theta_det) / dcos_det);
 
-        if (cut1->IsInside(amp1 + amp0, dt) && cut2->IsInside((amp1 - amp0) / (amp0 + amp1), dt)) {
+        if (bool passCut = amp0>7e3 && (amp0 + amp1 >= 17000.0)) {
             counts[bin][bin_beam][bin_det]++;
         }
     }
@@ -128,7 +128,7 @@ void efficiency_toy(){
                 u_counts[e][b][d] = std::sqrt(counts[e][b][d]);
 
     fin->Close();
-    fcut1->Close();
+    //fcut1->Close();
 
     // ===== CALCULAR EFICIENCIAS =====
     std::vector<EfficiencyResult> all_efficiencies(nbins);
@@ -141,7 +141,7 @@ void efficiency_toy(){
             for (int b = 0; b < nbins_beam; b++) {
                 if (counts[ebin][b][d] > 0 && acceptance[b][d] > 0) { has_counts = true; break; }
             }
-            if (has_counts) { ref_bins[ebin] = d; break; }
+            if (has_counts) { ref_bins[ebin] = d; break; } // first that has counts
         }
 
         if (ref_bins[ebin] == -1) {
@@ -175,21 +175,6 @@ void efficiency_toy(){
     //
     //   eps_beam(E,b)   = Σ_d N(E,b,d) * eps_det(E,d)  /  Σ_d N(E,b,d)
     //   u_eps_beam(E,b) = sqrt( Σ_d (N(E,b,d)/ΣN)^2 * u_eps_det(E,d)^2 )
-    //
-    // IMPORTANTE -- esto NO es lo mismo que ponderar por aceptancia, y
-    // responde a una pregunta distinta: "¿qué eficiencia tuvieron en
-    // promedio los eventos que de verdad detecté?" en vez de "¿qué factor de
-    // corrección no sesgado debo aplicar para recuperar el flujo físico
-    // Phi(e,b)?". Ponderar por cuentas infra-representa los bins de detector
-    // de baja eficiencia (porque generan pocas cuentas), así que eps_beam
-    // sale sesgada hacia valores más altos que el verdadero factor de
-    // corrección. Válido como estadístico descriptivo / diagnóstico; si esto
-    // se usa luego para dividir N_tot(e,b) y sacar Phi(e,b) o la sección
-    // eficaz, el resultado quedará sesgado -- para eso, usar la versión
-    // ponderada por aceptancia geométrica en su lugar.
-    //
-    // Esta curva ya NO sirve como chequeo de consistencia independiente del
-    // método (antes sí lo era, cuando se recalculaba desde cero).
     // =====================================================================
     std::vector<EfficiencyResult> all_eff_beam(nbins);
 
@@ -236,6 +221,76 @@ void efficiency_toy(){
             efficiencies_beam[i]->SetBinContent(b + 1, all_eff_beam[i].eps[b]);
             efficiencies_beam[i]->SetBinError(b + 1, all_eff_beam[i].u_eps[b]);
         }
+    }
+
+    // =====================================================================
+    // EFICIENCIA PROMEDIO POR BIN DE ENERGÍA (colapsando beam y det bins)
+    // -----------------------------------------------------------------------
+    // Igual que eps_beam, pero ahora se pesa por TODAS las cuentas del bin
+    // de energía (suma sobre b y d), no solo sobre d dentro de un b fijo.
+    //
+    //   eps_avg(E)   = Σ_{b,d} N(E,b,d) * eps_det(E,d)  /  Σ_{b,d} N(E,b,d)
+    //   u_eps_avg(E) = sqrt( Σ_{b,d} (N(E,b,d)/ΣN)^2 * u_eps_det(E,d)^2 )
+    // =====================================================================
+    std::vector<double> eps_avg(nbins, 0.0), u_eps_avg(nbins, 0.0);
+
+    for (int e = 0; e < nbins; e++) {
+        double wsum = 0.0, wsum_eps = 0.0, var = 0.0;
+        for (int b = 0; b < nbins_beam; b++) {
+            for (int d = 0; d < nbins_det; d++) {
+                double w = counts[e][b][d];
+                if (w <= 0) continue;
+                wsum     += w;
+                wsum_eps += w * all_efficiencies[e].eps[d];
+                var      += w * w * all_efficiencies[e].u_eps[d] * all_efficiencies[e].u_eps[d];
+            }
+        }
+        if (wsum > 0) {
+            eps_avg[e]   = wsum_eps / wsum;
+            u_eps_avg[e] = std::sqrt(var) / wsum;
+        }
+        std::cout << "Bin " << e << " (" << E_low[e] << "-" << E_high[e]
+                   << " MeV): <eff> = " << eps_avg[e] << " +/- " << u_eps_avg[e] << "\n";
+    }
+
+    // =====================================================================
+    // EFICIENCIA PROMEDIO POR BIN DE ENERGÍA, PONDERADA POR ACEPTANCIA
+    // -----------------------------------------------------------------------
+    // A diferencia de la versión anterior (ponderada por counts), aquí el
+    // peso es la aceptancia geométrica pura dOmega(b,d), independiente de
+    // cuántos eventos cayeron realmente en cada bin. Esto evita el sesgo
+    // circular de sobre-pesar los bins donde eps ya es alta (porque ahí se
+    // detectan más cuentas). Es la versión correcta para usar como factor
+    // de corrección al extraer flujo / sección eficaz.
+    //
+    //   eps_avg(E)   = Σ_{b,d} dOmega(b,d) * eps_det(E,d)  /  Σ_{b,d} dOmega(b,d)
+    //   u_eps_avg(E) = sqrt( Σ_{b,d} (dOmega(b,d)/ΣdOmega)^2 * u_eps_det(E,d)^2 )
+    //
+    // Solo se suman los bins de detector donde eps_det fue efectivamente
+    // determinada (d <= ref_bins[e]); más allá del bin de referencia no hay
+    // información y no debe contribuir con eps=0 artificial.
+    // =====================================================================
+    std::vector<double> eps_avg_acc(nbins, 0.0), u_eps_avg_acc(nbins, 0.0);
+
+    for (int e = 0; e < nbins; e++) {
+        double wsum = 0.0, wsum_eps = 0.0, var = 0.0;
+
+        int dmax = (ref_bins[e] >= 0) ? ref_bins[e] : -1;
+        for (int b = 0; b < nbins_beam; b++) {
+            for (int d = 0; d <= dmax; d++) {
+                double w = acceptance[b][d];
+                if (w <= 0) continue;
+                wsum     += w;
+                wsum_eps += w * all_efficiencies[e].eps[d];
+                var      += w * w * all_efficiencies[e].u_eps[d] * all_efficiencies[e].u_eps[d];
+            }
+        }
+        if (wsum > 0) {
+            eps_avg_acc[e]   = wsum_eps / wsum;
+            u_eps_avg_acc[e] = std::sqrt(var) / wsum;
+        }
+        std::cout << "Bin " << e << " (" << E_low[e] << "-" << E_high[e]
+                   << " MeV): <eff>_acc = " << eps_avg_acc[e] << " +/- " << u_eps_avg_acc[e] << "\n";
     }
 
     // ===== GRÁFICO 1: Eficiencia vs cos(theta_det), overlay de todos los ebins =====
@@ -334,6 +389,33 @@ void efficiency_toy(){
     c2->Update();
     c2->SaveAs("efficiency_vs_energy.png");
     c2->SaveAs("efficiency_vs_energy.pdf");
+
+    // ===== GRÁFICO 7: Eficiencia PROMEDIO vs Energía =====
+    TCanvas *c7 = new TCanvas("c_eff_avg_vs_energy", "Average efficiency vs Energy", 1100, 850);
+    c7->SetLogx();
+
+    TGraphErrors *g_avg = new TGraphErrors(nbins, x_vals.data(), eps_avg.data(), nullptr, u_eps_avg.data());
+    g_avg->SetName("eff_avg_vs_E");
+    g_avg->SetTitle(";E_{n} (MeV);#LTEfficiency#GT");
+    g_avg->SetMarkerStyle(20);
+    g_avg->SetMarkerColor(kAzure + 2);
+    g_avg->SetLineColor(kAzure + 2);
+    g_avg->SetMarkerSize(1.3);
+    g_avg->SetLineWidth(2);
+    g_avg->Draw("AP");
+    g_avg->GetYaxis()->SetRangeUser(0.0, max_eff2);
+    g_avg->GetXaxis()->SetTitle("E_{n} (MeV)");
+    g_avg->GetYaxis()->SetTitle("#LTEfficiency#GT");
+
+    TLine *line7 = new TLine(g_avg->GetXaxis()->GetXmin(), 1.0, g_avg->GetXaxis()->GetXmax(), 1.0);
+    line7->SetLineStyle(9);
+    line7->SetLineColor(kGray + 2);
+    line7->Draw("same");
+
+    DrawTag(0.16, 0.93, "");
+    c7->Update();
+    c7->SaveAs("efficiency_avg_vs_energy.png");
+    c7->SaveAs("efficiency_avg_vs_energy.pdf");
 
     // =====================================================================
     // GRÁFICO 3: Eficiencia vs cos(theta_beam), overlay de todos los ebins
@@ -559,8 +641,35 @@ void efficiency_toy(){
     c6->SaveAs("efficiency_relative_uncertainty.png");
     c6->SaveAs("efficiency_relative_uncertainty.pdf");
 
+    // ===== GRÁFICO 8: Eficiencia PROMEDIO (ponderada por aceptancia) vs Energía =====
+    TCanvas *c8 = new TCanvas("c_eff_avg_acc_vs_energy", "Average efficiency (acceptance-weighted) vs Energy", 1100, 850);
+    c8->SetLogx();
+
+    TGraphErrors *g_avg_acc = new TGraphErrors(nbins, x_vals.data(), eps_avg_acc.data(), nullptr, u_eps_avg_acc.data());
+    g_avg_acc->SetName("eff_avg_acc_vs_E");
+    g_avg_acc->SetTitle(";E_{n} (MeV);#LTEfficiency#GT_{acc}");
+    g_avg_acc->SetMarkerStyle(20);
+    g_avg_acc->SetMarkerColor(kOrange + 7);
+    g_avg_acc->SetLineColor(kOrange + 7);
+    g_avg_acc->SetMarkerSize(1.3);
+    g_avg_acc->SetLineWidth(2);
+    g_avg_acc->Draw("AP");
+    g_avg_acc->GetYaxis()->SetRangeUser(0.0, max_eff2);
+    g_avg_acc->GetXaxis()->SetTitle("E_{n} (MeV)");
+    g_avg_acc->GetYaxis()->SetTitle("#LTEfficiency#GT (acceptance-weighted)");
+
+    TLine *line8 = new TLine(g_avg_acc->GetXaxis()->GetXmin(), 1.0, g_avg_acc->GetXaxis()->GetXmax(), 1.0);
+    line8->SetLineStyle(9);
+    line8->SetLineColor(kGray + 2);
+    line8->Draw("same");
+
+    DrawTag(0.16, 0.93, "");
+    c8->Update();
+    c8->SaveAs("efficiency_avg_acceptance_weighted_vs_energy.png");
+    c8->SaveAs("efficiency_avg_acceptance_weighted_vs_energy.pdf");
+
     // ===== GUARDAR =====
-    TFile *fout = new TFile("/Users/nico/Desktop/Tese/Analysis/cross_section/efficiencies_au_toy.root", "RECREATE");
+    TFile *fout = new TFile("/Users/nico/Desktop/Tese/Analysis/cross_section/efficiencies_u_toy.root", "RECREATE");
 
     for (int i = 0; i < nbins; i++) efficiencies[i]->Write();
     for (int i = 0; i < nbins; i++) efficiencies_beam[i]->Write();
@@ -574,6 +683,10 @@ void efficiency_toy(){
     c4->Write();
     c5->Write();
     c6->Write();
+    g_avg->Write();
+    c7->Write();
+    g_avg_acc->Write();
+    c8->Write();
 
     fout->Close();
 

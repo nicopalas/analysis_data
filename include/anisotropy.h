@@ -37,6 +37,7 @@ static AnisotropyResult anisotropy (
             }
         }
         counts_theta.push_back(counts/denom);
+        std::cout << "Counts at ebin_beam = " << i << " = " << counts << std::endl;
     }
     double counts_90 = counts_theta[bin_90];
     for (int i = 0; i<nbins_beam; i++){

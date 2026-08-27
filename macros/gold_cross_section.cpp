@@ -22,21 +22,18 @@ void gold_cross_section(){
     flux_file->Close();
 
     // ── cuts ─────────────────────────────────────────────────────────────────
-    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/sum_amps_gold.root", "READ");
+    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold_2.root", "READ");
     if (!fcut0 || fcut0->IsZombie()) { std::cerr << "Cannot open cut0 file\n"; return; }
-    TCutG *cut0 = (TCutG*)fcut0->Get("sum_amps");
+    TCutG *cut0 = (TCutG*)fcut0->Get("cut1");
     if (!cut0) { std::cerr << "TCutG gold0 not found\n"; return; }
-
-    TFile *fcut1 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/amps_gold.root", "READ");
-    if (!fcut1 || fcut1->IsZombie()) { std::cerr << "Cannot open cut1 file\n"; return; }
-    TCutG *cut1 = (TCutG*)fcut1->Get("amps");
+    TCutG *cut1 = (TCutG*)fcut0->Get("cut2");
     if (!cut1) { std::cerr << "TCutG gold1 not found\n"; return; }
 
 
 
     // ── energy binning ────────────────────────────────────────────────────────
-    const int nbins = 10;
-    std::vector<double> energy_bins = buildLogBins(nbins, 50.0, 1000.0);
+    const int nbins = 20;
+    std::vector<double> energy_bins = buildLogBins(nbins, 40.0, 1000.0);
     std::vector<double> E_low(nbins), E_high(nbins);
     for (int e = 0; e < nbins; ++e) {
         E_low[e]  = energy_bins[e];
@@ -80,13 +77,13 @@ void gold_cross_section(){
 
     for (Long64_t i = 0; i < nentries; i++){
         tin->GetEntry(i);
-        if (neutron_energy < 10.0 || neutron_energy > 1000.0) continue;
+        if (neutron_energy < 40.0 || neutron_energy > 1000.0) continue;
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
 
         double dt = tof1 - tof0;
-        if (cut0->IsInside(amp0+amp1, dt) && cut1->IsInside(amp1, amp0))
+        if (cut0->IsInside(amp0+amp1, dt) && cut1->IsInside((amp1-amp0)/(amp0+amp1), dt))
             counts[bin]++;
     }
     fin->Close();
@@ -140,9 +137,9 @@ void gold_cross_section(){
 
     double scale = 1.0;
     for (int e = 0; e < nbins; ++e) {
-        double exp_val = h_cs_raw->GetBinContent(e+1);
+        double exp_val = h_cs_raw->GetBinContent(e+5);
         if (exp_val <= 0.0) continue;
-        double Ec      = h_cs_raw->GetBinCenter(e+1);
+        double Ec      = h_cs_raw->GetBinCenter(e+5);
         double ref_val = gr_ref->Eval(Ec);
         if (ref_val <= 0.0) continue;
         scale = ref_val / exp_val;

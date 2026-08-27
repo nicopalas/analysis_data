@@ -23,7 +23,7 @@ void uranium_analysis(){
     // ================================================================
     // EFFICIENCY — coarse binning
     // ================================================================
-    const std::vector<double> energy_bins_eff = {1, 10, 100, 500, 1000};
+    const std::vector<double> energy_bins_eff = {1, 10, 100, 700, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeUraniumConfig(energy_bins_eff, "eff");
@@ -45,7 +45,7 @@ void uranium_analysis(){
     // --- histograms ---
     std::vector<TH1D*> hists_tof_eff(nbins_eff, nullptr);
     for(int i = 0; i < nbins_eff; ++i){
-        hists_tof_eff[i] = new TH1D(Form("htof_eff_%d", i), "", 200, -30, 30);
+        hists_tof_eff[i] = new TH1D(Form("htof_eff_%d", i), "", 200, -20, 8);
         hists_tof_eff[i]->SetDirectory(0);
     }
 
@@ -96,7 +96,7 @@ void uranium_analysis(){
                   cs_upeak_eff,   u_cs_upeak_eff,
                   counts_signal_eff, u_counts_signal_eff);
 
-    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/acceptance_coincidence.csv";
     Vec2D acceptance, dOmega_fine;
     if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
         std::cerr << "Failed to load acceptance CSV" << std::endl;
@@ -153,7 +153,7 @@ void uranium_analysis(){
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
     const int nbins_aniso = 40;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.1, 1000.0);
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.5, 1000.0);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 
@@ -166,7 +166,7 @@ void uranium_analysis(){
 
     std::vector<TH1D*> hists_tof_aniso(nbins_aniso, nullptr);
     for(int i = 0; i < nbins_aniso; ++i){
-        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 100, -20, 20);
+        hists_tof_aniso[i] = new TH1D(Form("htof_aniso_%d", i), "", 200, -30, 30);
         hists_tof_aniso[i]->SetDirectory(0);
     }
 
@@ -265,11 +265,11 @@ for(int i = 0; i < nbins_aniso; ++i){
                 ex.data(), aniso[e].u_w.data());
             g->SetName(Form("anisotropy_ebin%d", e));
             g->SetTitle(Form(
-                "W(#theta)/W(90) %.1f-%.1f MeV;"
+                "W(#theta)/W(90) %.2f-%.2f MeV;"
                 "cos(#theta_{beam});W(#theta)/W(90)",
                 energy_bins_aniso[e], energy_bins_aniso[e+1]));
             g->SetMinimum(0.4);
-            g->SetMaximum(2.5);
+            g->SetMaximum(3.5);
         }
 
         if(g) g->Write();
@@ -292,9 +292,6 @@ for(int i = 0; i < nbins_aniso; ++i){
     TGraphErrors *g = fin_ratio ? fin_ratio->Get<TGraphErrors>("anisotropy_ratio") : nullptr;
     plotAnisoVsExfor(g, sources,
                  outdir + "aniso_vs_exfor.pdf");
-
-    plotAnisoVsExforIndividual(g, sources,
-                           outdir + "aniso_vs_exfor_grid.pdf");
     plotPullsVsExfor(g, sources, outdir + "pulls_vs_exfor_grid.pdf");
     plotPullsOverlay(g, sources, outdir + "pulls_vs_exfor_overlay.pdf");
     fout_aniso->Close();

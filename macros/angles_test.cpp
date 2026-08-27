@@ -1,18 +1,25 @@
 #include "TFile.h"
 #include "TTree.h"
 #include "TH1D.h"
+#include "TH2D.h"
 #include "TCanvas.h"
 #include "TLegend.h"
 #include "TLine.h"
+#include "TColor.h"
+#include "TStyle.h"
+#include "TMath.h"
+#include "TVirtualPad.h"
+#include <vector>
 #include <cmath>
 #include <iostream>
+
 static int okabeIto(double r, double g, double b)
 {
     return TColor::GetColor((Float_t)(r/255.), (Float_t)(g/255.), (Float_t)(b/255.));
 }
 
 // full qualitative palette (Okabe & Ito, 2008), CUD-safe, with sky blue and
-// vermillion dropped per house choice — navy blue and burnt orange lead instead
+// vermillion dropped per house choice -- navy blue and burnt orange lead instead
 static std::vector<int> okabeItoPalette()
 {
     return {
@@ -21,7 +28,7 @@ static std::vector<int> okabeItoPalette()
         okabeIto(  0, 158, 115),  // bluish green
         okabeIto(204, 121, 167),  // reddish purple
         okabeIto(  0,   0,   0),  // black
-        okabeIto(240, 228,  66)   // yellow (use sparingly — low contrast on white)
+        okabeIto(240, 228,  66)   // yellow (use sparingly -- low contrast on white)
     };
 }
 
@@ -68,13 +75,8 @@ static void stylePad(TVirtualPad* pad)
 }
 
 // ------------------------------------------------------------------------
-// Background fits: one row per energy bin, raw spectrum + fit | subtracted
-// spectrum. energy_bins is optional so existing call sites keep compiling;
-// pass it to get per-row en
-// ------------------------------------------------------------------------
 // Corrected angle reconstruction.
 //
-// Changes relative to the version you pasted:
 //   1) The stray reference to `phi` in the failure branch was removed --
 //      it was never a parameter or local variable (leftover from an
 //      earlier version), and would not compile.
@@ -91,10 +93,11 @@ static void compute_angles(
     double offsety0, double offsety1,
     double& cos_theta_det,
     double& phi_det,
+    double& phi,
     double& cos_theta)
 {
-    double dx = (x1 + 2.5) - (x0 - 2.5);
-    double dy =  y1 - y0 - (offsety1 - offsety0);
+    double dx = (x1 + 2.355) - (x0 - 2.340);
+    double dy =  y1 - y0 - (offsety1-offsety0);
     double dz =  5.0;
 
     double nd = std::sqrt(dx*dx + dy*dy + dz*dz);
@@ -108,11 +111,13 @@ static void compute_angles(
         double nz = ( sth * std::cos(phi_det) + cos_theta_det) / std::sqrt(2.0);
         double nb = std::sqrt(nx*nx + ny*ny + nz*nz);
 
-        cos_theta = (nb > 0.0) ? nz / nb : -999.;
+        if (nb > 0.0) { cos_theta = nz/nb; phi = std::atan2(ny,nx); }
+        else           { cos_theta = -999.; phi = -999.; }
     } else {
         cos_theta_det = -999.;
         phi_det       = -999.;
         cos_theta     = -999.;
+        phi = -999.;
     }
 }
 
@@ -132,19 +137,24 @@ void angles_test()
 
     double x0, x1, y0, y1;
     double cos_theta, cos_theta_det;
-    tin->SetBranchAddress("x0",        &x0);
-    tin->SetBranchAddress("x1",        &x1);
-    tin->SetBranchAddress("y0",        &y0);
-    tin->SetBranchAddress("y1",        &y1);
-    tin->SetBranchAddress("cos_theta", &cos_theta);
+    tin->SetBranchAddress("x0",            &x0);
+    tin->SetBranchAddress("x1",            &x1);
+    tin->SetBranchAddress("y0",            &y0);
+    tin->SetBranchAddress("y1",            &y1);
+    tin->SetBranchAddress("cos_theta",     &cos_theta);
     tin->SetBranchAddress("cos_theta_det", &cos_theta_det);
 
     Long64_t nentries = tin->GetEntries();
 
-    TH1D* hist_theta           = new TH1D("hist_theta_formula",   "", 100, 0, 1);
-    TH1D* hist_theta_corrected = new TH1D("hist_theta_corrected", "", 100, 0, 1);
+    TH1D* hist_theta               = new TH1D("hist_theta_formula",       "", 100, 0, 1);
+    TH1D* hist_theta_corrected     = new TH1D("hist_theta_corrected",     "", 100, 0, 1);
     TH1D* hist_theta_det           = new TH1D("hist_theta_det_formula",   "", 100, 0, 1);
     TH1D* hist_theta_det_corrected = new TH1D("hist_theta_det_corrected", "", 100, 0, 1);
+
+    // X axis = phi (-pi, pi) ; Y axis = |cos(theta)| (0, 1)
+    TH2D* hist_theta_phi = new TH2D("hist_theta_phi", "",
+                                    100, -TMath::Pi(), TMath::Pi(),
+                                    100, 0.0, 1.0);
 
     // --- pass 1: fill the uncorrected distribution + accumulate means ---
     double mean_x0 = 0.0, mean_x1 = 0.0, mean_y0 = 0.0, mean_y1 = 0.0;
@@ -165,13 +175,14 @@ void angles_test()
     // --- pass 2: fill the offset-corrected distribution ---
     for (Long64_t i = 0; i < nentries; ++i){
         tin->GetEntry(i);
-        double cos_theta_corrected, cos_theta_det_corrected, phi_det;
+        double cos_theta_corrected, cos_theta_det_corrected, phi_det, phi;
         compute_angles(x0, y0, x1, y1,
                        mean_x0, mean_x1, mean_y0, mean_y1,
-                       cos_theta_det_corrected, phi_det, cos_theta_corrected);
+                       cos_theta_det_corrected, phi_det, phi, cos_theta_corrected);
         if(cos_theta_corrected < -1.0) continue;   // skip -999 failure flag
         hist_theta_corrected->Fill(std::fabs(cos_theta_corrected));
         hist_theta_det_corrected->Fill(std::fabs(cos_theta_det_corrected));
+        hist_theta_phi->Fill(phi, std::fabs(cos_theta_corrected));   // X=phi, Y=|cos(theta)|
     }
 
     // ====================================================================
@@ -179,7 +190,7 @@ void angles_test()
     // ====================================================================
     setPubStyle();
 
-    const int kRawColor  = okabeIto(  0,   0,   0);   // black    -> uncorrected
+    const int kRawColor  = okabeIto(  0,   0,   0);   // black     -> uncorrected
     const int kCorrColor = okabeIto(  0, 114, 178);   // navy blue -> corrected
 
     TCanvas* c1 = new TCanvas("c_angles", "Angle reconstruction", 850, 680);
@@ -294,5 +305,21 @@ void angles_test()
 
     c2->SaveAs("angle_pull.pdf");
 
-    std::cout << "[INFO] Saved angle_overlay.pdf and angle_pull.pdf\n";
+    // ====================================================================
+    // Mapa 2D: phi (marco del haz) vs |cos(theta)|
+    // ====================================================================
+    TCanvas* c4 = new TCanvas("c_phi_theta", "phi vs theta", 850, 680);
+    stylePad(gPad);
+    gPad->SetRightMargin(0.16);          // sitio para la paleta del eje Z
+
+    hist_theta_phi->SetTitle(";#phi (rad);|cos(#theta)|");
+    hist_theta_phi->GetXaxis()->SetTitleOffset(1.1);
+    hist_theta_phi->GetYaxis()->SetTitleOffset(1.5);
+    hist_theta_phi->GetXaxis()->SetNdivisions(510);
+    hist_theta_phi->Draw("COLZ");
+
+    c4->SaveAs("phi_vs_theta.pdf");
+
+    std::cout << "[INFO] Saved angle_overlay.pdf, angle_overlay_det.pdf, "
+                 "angle_pull.pdf and phi_vs_theta.pdf\n";
 }

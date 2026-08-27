@@ -28,7 +28,7 @@ void gold_xs(){
     flux_file->Close();
 
     // ── cuts ─────────────────────────────────────────────────────────────────
-    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold.root", "READ");
+    TFile *fcut0 = TFile::Open("/Users/nico/Desktop/Tese/Analysis/gold_2.root", "READ");
     if (!fcut0 || fcut0->IsZombie()) { std::cerr << "Cannot open cut0 file\n"; return; }
     TCutG *cut0 = (TCutG*)fcut0->Get("cut1");
     if (!cut0) { std::cerr << "TCutG gold0 not found\n"; return; }
@@ -37,7 +37,7 @@ void gold_xs(){
     if (!cut1) { std::cerr << "TCutG gold1 not found\n"; return; }
 
     // ── acceptance (solid angle per beam/det cell) ──────────────────────────
-    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/acceptance_coincidence.csv";
     Vec2D acceptance, dOmega_fine;
     if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
         std::cerr << "Failed to load acceptance CSV" << std::endl;
@@ -64,7 +64,7 @@ void gold_xs(){
     // y se dejan sin corregir (contribución nula a la sección eficaz), ver
     // aviso más abajo.
     AnalysisConfig cfg = makeGoldConfig(energy_bins);
-    std::string eff_path = cfg.efficiency_file;
+    std::string eff_path = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/output_efficiency_gold.root";
     TFile *eff_file = TFile::Open(eff_path.c_str(), "READ");
     if (!eff_file || eff_file->IsZombie()) { std::cerr << "Cannot open efficiency file: " << eff_path << "\n"; return; }
 
@@ -149,7 +149,7 @@ void gold_xs(){
         }
 
         if (eff_cache.find(eff_bin) == eff_cache.end()) {
-            TH1D *h_eff = (TH1D*)eff_file->Get(Form("eff_ebin_%d", eff_bin));
+            TH1D *h_eff = (TH1D*)eff_file->Get(Form("heff_ebin%d", eff_bin));
             if (!h_eff) {
                 std::cerr << "Warning: eff_ebin_" << eff_bin << " not found, bin " << e << " sin corregir\n";
                 continue;
@@ -326,7 +326,7 @@ void uranium_xs(){
     if (!cut1) { std::cerr << "TCutG gold1 not found\n"; return; }
 
     // ── acceptance (solid angle per beam/det cell) ──────────────────────────
-    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/acceptance_coincidence.csv";
+    std::string acceptance_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/acceptance_coincidence.csv";
     Vec2D acceptance, dOmega_fine;
     if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
         std::cerr << "Failed to load acceptance CSV" << std::endl;
@@ -350,9 +350,9 @@ void uranium_xs(){
     // logarítmicos entre 1 y 1000 MeV, fichero "efficiencies_u_toy.root".
     // Si tienes una makeUraniumConfig() real, dímelo y cambio esto por
     // cfg.energy_bins_eff / cfg.efficiency_file como en gold_xs().
-    const int nbins_eff_u = 4;
-    std::vector<double> energy_bins_eff_u = {1, 10, 100, 500, 1000};
-    std::string eff_path_u = "/Users/nico/Desktop/Tese/Analysis/cross_section/efficiencies_u_toy.root";
+    const int nbins_eff_u = 5;
+    std::vector<double> energy_bins_eff_u = {1, 10, 100, 300, 600, 1000};
+    std::string eff_path_u = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/output_efficiency_uranium.root";
     TFile *eff_file = TFile::Open(eff_path_u.c_str(), "READ");
     if (!eff_file || eff_file->IsZombie()) { std::cerr << "Cannot open efficiency file: " << eff_path_u << "\n"; return; }
 
@@ -430,7 +430,7 @@ void uranium_xs(){
         }
 
         if (eff_cache.find(eff_bin) == eff_cache.end()) {
-            TH1D *h_eff = (TH1D*)eff_file->Get(Form("eff_ebin_%d", eff_bin));
+            TH1D *h_eff = (TH1D*)eff_file->Get(Form("heff_ebin%d", eff_bin));
             if (!h_eff) {
                 std::cerr << "Warning: eff_ebin_" << eff_bin << " not found, bin " << e << " sin corregir\n";
                 continue;

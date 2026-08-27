@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include "Math/PdfFuncMathCore.h"  
 
 
 
@@ -29,8 +30,7 @@ struct BackgroundFit {
 static std::string getBackgroundFormula(Sample sample){
     switch(sample){
         case Sample::uranium: return "[0]";
-        case Sample::gold:    return "[0]+[1]*x+[2]*x*x"
-                                     "+[3]*TMath::Gaus(x,[4],[5],1)";
+        case Sample::gold:    return "[0] + [1]*ROOT::Math::crystalball_pdf(x,[4],[5],[3],[2])";
     }
     return "[0]+[1]*x";
 }
@@ -38,20 +38,37 @@ static std::string getBackgroundFormula(Sample sample){
 static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
     switch(sample){
         case Sample::uranium:
-            f->SetParLimits(0, 0, 1000);
+            f->SetParLimits(0, 0.0, 1e6);
+            f->SetParameter(0, std::max(1e-3, h->GetBinContent(h->FindBin(0.0))));
             break;
-        case Sample::gold:
-            f->SetParLimits(0,  0.0,  1e6);
-            f->SetParLimits(1, -5.0,  5.0);
-            f->SetParLimits(2, -1.0,  1.0);
-            f->SetParLimits(3,  0.0,  1e6);
-            f->SetParLimits(4, -15.0, -5.0);
-            f->SetParLimits(5,  0.5,  4.0);
-            f->SetParameters(
-                1.0, 0.0, 1e-3,
-                std::max(1.0, h->GetBinContent(h->FindBin(-9.0))), -9.0, 1.5
-            );
+
+        case Sample::gold: {
+            // rough seed for the flat level: average of two sidebands far from the peak
+            const double lvl = 0.5*( h->GetBinContent(h->FindBin(-15.0))
+                                   + h->GetBinContent(h->FindBin( 12.0)) );
+
+            // rough seed for the yield: peak height x sigma x sqrt(2pi)
+            const double pk   = std::max(1.0, h->GetBinContent(h->FindBin(-6.0)) - lvl);
+            const double sig0 = 1.5;
+            const double yld  = pk * sig0 * TMath::Sqrt(TMath::TwoPi()) * h->GetBinWidth(1);
+
+            f->SetParLimits(0,  0.0,   1e6);   // flat level
+            f->SetParLimits(1,  0.0,   1e7);   // yield >= 0
+            f->SetParLimits(2, -7.0,  -5.0);   // mean
+            f->SetParLimits(3,  0.5,   2.0);   // sigma
+            f->SetParLimits(4,  0.2,   5.0);   // alpha != 0
+            f->SetParLimits(5,  1.01, 20.0);   // n > 1 mandatory
+
+            f->SetParameters(std::max(1e-3, lvl), yld, -6.0, sig0, 1.0, 3.0);
+
+            f->SetParName(0, "flat");
+            f->SetParName(1, "N_U");
+            f->SetParName(2, "mu_U");
+            f->SetParName(3, "sigma_U");
+            f->SetParName(4, "alpha");
+            f->SetParName(5, "n");
             break;
+        }
     }
 }
 
@@ -59,21 +76,19 @@ static void setBackgroundParameters(TF1* f, Sample sample, TH1D* h){
 static void decomposeGoldIntegrals(
     TF1* f,
     double roi_min, double roi_max,
-    double& counts_bkg,   double& u_counts_bkg,
-    double& counts_upeak, double& u_counts_upeak)
+    double& counts_bkg,
+    double& counts_upeak)
 {
-    // continuum: polynomial only [0]+[1]*x+[2]*x*x
-    TF1 f_poly("f_poly_decomp", "[0]+[1]*x+[2]*x*x", roi_min, roi_max);
-    f_poly.SetParameters(f->GetParameter(0), f->GetParameter(1), f->GetParameter(2));
-    counts_bkg = f_poly.Integral(roi_min, roi_max);
+    // flat continuum: [0]
+    counts_bkg = f->GetParameter(0) * (roi_max - roi_min);
 
-    // uranium peak: first gaussian [3]*Gaus(x,[4],[5],1)
-    TF1 f_upeak("f_upeak_decomp", "[0]*TMath::Gaus(x,[1],[2],1)", roi_min, roi_max);
-    f_upeak.SetParameters(f->GetParameter(3),
-                          f->GetParameter(4),
-                          f->GetParameter(5));
-    counts_upeak = f_upeak.Integral(roi_min, roi_max);
+    // uranium peak: clone the full model and switch off the continuum,
+    // so the parameter indices never have to be repeated here
+    std::unique_ptr<TF1> f_upeak(static_cast<TF1*>(f->Clone("f_upeak_decomp")));
+    f_upeak->SetParameter(0, 0.0);
+    counts_upeak = f_upeak->Integral(roi_min, roi_max);
 }
+
 
 static BackgroundFit fitBackground(
     const AnalysisConfig& cfg,
@@ -124,8 +139,8 @@ static BackgroundFit fitBackground(
     // decompose for gold
     if(cfg.sample == Sample::gold){
         decomposeGoldIntegrals(f, roi_min, roi_max,
-            result.counts_subtract_bkg,   result.u_counts_subtract_bkg,
-            result.counts_subtract_upeak, result.u_counts_subtract_upeak);
+            result.counts_subtract_bkg,
+            result.counts_subtract_upeak);
     } else {
         result.counts_subtract_bkg   = result.counts_subtract;
         result.u_counts_subtract_bkg = 0.0;  // filled by bootstrap below
@@ -179,7 +194,7 @@ static BackgroundFit fitBackground(
 
         if(cfg.sample == Sample::gold){
             double cb, ucb, cup, ucup;
-            decomposeGoldIntegrals(f_toy, roi_min, roi_max, cb, ucb, cup, ucup);
+            decomposeGoldIntegrals(f_toy, roi_min, roi_max, cb, cup);
             toy_integrals_bkg[itoy]   = cb;
             toy_integrals_upeak[itoy] = cup;
         } else {

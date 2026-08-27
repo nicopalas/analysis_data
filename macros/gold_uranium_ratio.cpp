@@ -122,11 +122,11 @@ void gold_uranium_ratio(){
     // ── reference ratio at the anchor point: Au(46.3 MeV) / U(46.0 MeV) ────────
     // use the tabulated points directly (both are close to 46 MeV and already
     // exist explicitly in each table, so no interpolation needed)
-    double ref_au_46 = sig_ref_au[2];   // 46.3 MeV -> 6.1 mb entry
-    double ref_u_46  = sig_ref_u[84];   // 46.00 MeV -> 1.68089904 barn entry
+    double ref_au_46 = sig_ref_au[2]; 
+    double ref_u_46  = sig_ref_u[84]*0.75+sig_ref_u[85]*0.25;   
     double ref_ratio_46 = ref_au_46 / ref_u_46;
 
-    printf("Reference anchor: sigma_Au(46.3 MeV)=%.4e barn, sigma_U(46.0 MeV)=%.4e barn, ref_ratio=%.4e\n",
+    printf("Reference anchor: sigma_Au(73.21 MeV)=%.4e barn, sigma_U(46.0 MeV)=%.4e barn, ref_ratio=%.4e\n",
            ref_au_46, ref_u_46, ref_ratio_46);
 
     // ── find the experimental bin closest to 46 MeV ────────────────────────────

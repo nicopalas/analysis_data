@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-enum class Sample {uranium, gold};
+enum class Sample {uranium, gold, uranium_mc};
 
 struct AnalysisConfig {
     Sample sample;
@@ -32,11 +32,11 @@ static AnalysisConfig makeUraniumConfig(
     AnalysisConfig c;
     c.sample          = Sample::uranium;
     c.tree_name       = "events_uranium";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_exp.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
     c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/output_efficiency_uranium.root";
-    c.energy_bins_eff = {1, 10, 100, 500, 1000};
+    c.energy_bins_eff = {1, 10, 100, 600, 1000, 2000};
     c.atoms = 5.04e17;
     return c;
 }
@@ -48,11 +48,27 @@ static AnalysisConfig makeGoldConfig(
     AnalysisConfig c;
     c.sample          = Sample::gold;
     c.tree_name       = "events_gold";
-    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_exp.root";
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
     c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/output_efficiency_gold.root";
-    c.energy_bins_eff = {40, 300, 600, 1000};
+    c.energy_bins_eff = {40, 300, 1000};
     c.atoms = 9.17e17;
+    return c;
+}
+
+static AnalysisConfig makeUraniumMCConfig(
+    const std::vector<double>& energy_bins,
+    const std::string& tag = "nominal")
+{
+    AnalysisConfig c;
+    c.sample          = Sample::uranium_mc;
+    c.tree_name       = "CoincTree";
+    c.input_file      = "/Users/nico/Desktop/Tese/Analysis/montecarlo/data/output_mc_final.root";
+    c.output_tag      = tag;
+    c.energy_bins     = energy_bins;
+    c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/montecarlo/output/U-238/output_efficiency_uranium.root";
+    c.energy_bins_eff = {10, 100, 500, 1000, 2000};
+    c.atoms = 5.04e17;
     return c;
 }

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include "config.h"
 #include "cut_variations.h"
+#include <vector>
+#include <utility>
 
 struct EventCuts {
     double roi_min, roi_max;
@@ -11,6 +13,9 @@ struct EventCuts {
     double ratio_max, ratio_min;
     double upeak_min = 0.0;   // uranium contamination window
     double upeak_max = 0.0;   // zero = not applicable
+    double bkg_min   = 0.0;   // left edge of the background window
+    double bkg_amp_min = 0.0; // extra amplitude-sum cut, 0 = none
+    double bkg_max = 0.0;
 };
 
 // ---------------------------------------------------------------------------
@@ -20,19 +25,19 @@ struct EventCuts {
 // ---------------------------------------------------------------------------
 static EventCuts getCutsNominal(Sample sample, double neutron_energy){
     switch(sample){
-        case Sample::uranium:
-            if(neutron_energy >= 1000)              return {-5.,  5.,  10e3, 35e3, 0.1, -0.9, 0.0, 0.0};
-            if(neutron_energy >= 500)               return {-4.,  4.,  13e3, 35e3, 0., -0.9, 0.0, 0.0};
-            if(neutron_energy >= 100)               return {-4.,  5.,  13e3, 35e3, 0.1, -.9, 0.0, 0.0};
-            if(neutron_energy >= 10)                return {-5.5, 6.,  10e3, 35e3, 0.1, -.9, 0.0, 0.0};
-            return                                         {-5.,  6.,   9e3, 38e3, 0.1, -1, 0.0, 0.0};
+       case Sample::uranium:
+        if(neutron_energy >= 1000) return {-4.,  6., 13e3,37e3, 0.,-0.9, 0.,0.,-6., 18e3, 0};
+        if(neutron_energy >= 500)  return {-4.,  6., 13e3,37e3, 0.,-0.8, 0.,0.,-6., 18e3, 0};
+        if(neutron_energy >= 100)  return {-4.,  6., 13e3,37e3, 0.,-0.8, 0.,0.,-6., 18e3, 0};
+        if(neutron_energy >= 10)   return {-4, 6., 13e3,37e3, 0.,-0.8, 0.,0.,-6., 18e3, 0};
+        return                            {-4.,  6.,  9e3,40e3, 0.,-0.8 , 0.,0., -6., 18e3, 0}; 
 
         case Sample::gold:
-            if(neutron_energy >= 1000)              return {-3.0, 3.2, 18e3, 37e3, 0.3, -0.7,  -14.5, -3.0};
-            if(neutron_energy >= 600)               return {-2., 3., 18e3, 40e3, 0.4, -0.5,  -14.5, -3.0};
-            if(neutron_energy >= 300)               return {-2., 2.5, 20e3, 40e3, 0.4, -0.5,  -14.5, -3.0};
-            if(neutron_energy >= 150)               return {-2.,  2.3, 20e3, 40e3, 0.3, -0.5, -14., -3.0};
-            return                                         {-2.,  2.2, 21e3, 40e3, 0.2, -0.4, -14., -2.5};
+            if(neutron_energy >= 1000)              return {-3.0, 4.2, 20e3, 37e3, 0.4, -0.6,  -14.5, -3.5, 0, 0, 0};
+            if(neutron_energy >= 600)               return {-3., 4., 20e3, 37e3, 0.4, -0.6,  -14.5, -3.5, 0, 0, 0};
+            if(neutron_energy >= 300)               return {-3., 4., 20e3, 37e3, 0.4, -0.6,  -14.5, -3.5, 0, 0, 0};
+            if(neutron_energy >= 150)               return {-3.,  4., 20e3, 37e3, 0.4, -0.6, -14., -3.5, 0, 0, 0};
+            return                                         {-3.,  4., 20e3, 37e3, 0.4, -0.6, -14., -3.5, 0, 0, 0};
         case Sample::uranium_mc:
             if(neutron_energy >= 500)               return {-4.,  4.,  10e3, 35e3, 0.3, 0.8, 0.0, 0.0};
             if(neutron_energy >= 100)               return {-5.,  5.,  11e3, 35e3, 0.3, 0.9, 0.0, 0.0};

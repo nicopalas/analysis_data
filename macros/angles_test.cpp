@@ -96,7 +96,7 @@ static void compute_angles(
     double& phi,
     double& cos_theta)
 {
-    double dx = (x1 + 2.355) - (x0 - 2.340);
+    double dx = (x1 + 2.459) - (x0 - 2.507);
     double dy =  y1 - y0 - (offsety1-offsety0);
     double dz =  5.0;
 
@@ -111,8 +111,8 @@ static void compute_angles(
         double nz = ( sth * std::cos(phi_det) + cos_theta_det) / std::sqrt(2.0);
         double nb = std::sqrt(nx*nx + ny*ny + nz*nz);
 
-        if (nb > 0.0) { cos_theta = nz/nb; phi = std::atan2(ny,nx); }
-        else           { cos_theta = -999.; phi = -999.; }
+        cos_theta = nz/nb;
+        phi = std::atan2(ny,nx);
     } else {
         cos_theta_det = -999.;
         phi_det       = -999.;
@@ -124,7 +124,7 @@ static void compute_angles(
 void angles_test()
 {
     TFile* fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_test.root");
     if(!fin || fin->IsZombie()){
         std::cerr << "[ERROR] Cannot open input file\n";
         return;
@@ -136,6 +136,7 @@ void angles_test()
     }
 
     double x0, x1, y0, y1;
+    double amp0, amp1;
     double cos_theta, cos_theta_det;
     tin->SetBranchAddress("x0",            &x0);
     tin->SetBranchAddress("x1",            &x1);
@@ -143,6 +144,8 @@ void angles_test()
     tin->SetBranchAddress("y1",            &y1);
     tin->SetBranchAddress("cos_theta",     &cos_theta);
     tin->SetBranchAddress("cos_theta_det", &cos_theta_det);
+    tin->SetBranchAddress("amp0", &amp0);
+    tin->SetBranchAddress("amp1", &amp1);
 
     Long64_t nentries = tin->GetEntries();
 
@@ -160,6 +163,7 @@ void angles_test()
     double mean_x0 = 0.0, mean_x1 = 0.0, mean_y0 = 0.0, mean_y1 = 0.0;
     for (Long64_t i = 0; i < nentries; ++i){
         tin->GetEntry(i);
+        if (amp0+amp1<10e3) continue;
         mean_x0 += x0;
         mean_x1 += x1;
         mean_y0 += y0;
@@ -175,6 +179,7 @@ void angles_test()
     // --- pass 2: fill the offset-corrected distribution ---
     for (Long64_t i = 0; i < nentries; ++i){
         tin->GetEntry(i);
+        if (amp0+amp1<10e3) continue;
         double cos_theta_corrected, cos_theta_det_corrected, phi_det, phi;
         compute_angles(x0, y0, x1, y1,
                        mean_x0, mean_x1, mean_y0, mean_y1,

@@ -143,13 +143,6 @@ bool readFlux(const std::string& fname,
         bin1 = std::max(bin1, 1);
         bin2 = std::min(bin2, h->GetNbinsX());
 
-        if (bin1 > bin2) {
-            std::cerr << "[WARN] Ebin " << e
-                      << " [" << E_low[e] << ", " << E_high[e]
-                      << "] out of range.\n";
-            continue;
-        }
-
         double integral = 0.0;
         double err2_sum = 0.0;
 
@@ -274,4 +267,101 @@ void normalised_xs(TH1D* cross_section, double xmin, double xmax, double integra
 
     std::cout << "Value at 9 MeV after  = "
               << normalised_histo->GetBinContent(bin_9MeV) << " barn\n";
+}
+
+// ── normalización a un punto de referencia, con propagación ───────────────
+struct RefPoint {
+    double E;        // MeV
+    double sigma;    // barn
+    double u_sigma;  // barn
+};
+
+struct NormalisedCS {
+    std::vector<double> sigma;        // barn, ya escalada
+    std::vector<double> u_sigma;      // total (stat + incert. de la normalización)
+    std::vector<double> u_sigma_stat; // sólo estadística escalada
+    double scale        = 0.0;        // k = sigma_ref / sigma_exp(bin_norm)
+    double u_scale_rel  = 0.0;        // incertidumbre relativa de k
+    int    bin_norm     = -1;
+    bool   ok           = false;
+};
+
+static NormalisedCS normalise_to_reference(
+    const std::vector<CrossSection>& cs,
+    const std::vector<double>&       energy_bins,   // nbins+1 fronteras
+    const std::vector<RefPoint>&     ref,
+    double                           E_norm)
+{
+    const int nbins = (int)cs.size();
+    NormalisedCS out;
+    out.sigma       .assign(nbins, 0.0);
+    out.u_sigma     .assign(nbins, 0.0);
+    out.u_sigma_stat.assign(nbins, 0.0);
+
+    if ((int)energy_bins.size() != nbins + 1 || ref.empty()) {
+        std::cerr << "[normalise_to_reference] binning o tabla de referencia inválidos\n";
+        return out;
+    }
+
+    // --- bin experimental que contiene E_norm ---
+    int b = -1;
+    for (int e = 0; e < nbins; ++e)
+        if (E_norm >= energy_bins[e] && E_norm < energy_bins[e+1]) { b = e; break; }
+
+    if (b < 0) {
+        std::cerr << "[normalise_to_reference] E_norm=" << E_norm
+                  << " MeV fuera del binning\n";
+        return out;
+    }
+    if (cs[b].sigma <= 0.0) {
+        std::cerr << "[normalise_to_reference] bin de normalización " << b
+                  << " vacío (sigma=" << cs[b].sigma << ")\n";
+        return out;
+    }
+
+    // --- punto de referencia más cercano a E_norm ---
+    const RefPoint* p = &ref[0];
+    double dmin = std::fabs(ref[0].E - E_norm);
+    for (const auto& r : ref) {
+        double d = std::fabs(r.E - E_norm);
+        if (d < dmin) { dmin = d; p = &r; }
+    }
+    if (p->sigma <= 0.0) {
+        std::cerr << "[normalise_to_reference] punto de referencia no positivo\n";
+        return out;
+    }
+
+    const double sig_b   = cs[b].sigma;
+    const double u_sig_b = cs[b].u_sigma;
+    const double rel_ref = p->u_sigma / p->sigma;   // incert. relativa de la referencia
+    const double rel_b   = u_sig_b     / sig_b;     // incert. relativa del bin ancla
+
+    out.bin_norm    = b;
+    out.scale       = p->sigma / sig_b;
+    out.u_scale_rel = std::sqrt(rel_ref*rel_ref + rel_b*rel_b);
+
+    for (int e = 0; e < nbins; ++e) {
+        if (cs[e].sigma <= 0.0) continue;
+
+        out.sigma[e]        = out.scale * cs[e].sigma;
+        out.u_sigma_stat[e] = out.scale * cs[e].u_sigma;
+
+        if (e == b) {
+            // el bin ancla queda fijado al valor de referencia: sólo su incertidumbre
+            out.u_sigma[e] = out.sigma[e] * rel_ref;
+        } else {
+            double rel_e = cs[e].u_sigma / cs[e].sigma;
+            out.u_sigma[e] = out.sigma[e] *
+                std::sqrt(rel_e*rel_e + rel_b*rel_b + rel_ref*rel_ref);
+        }
+    }
+
+    out.ok = true;
+    printf("[norm] E_norm=%.1f MeV -> bin %d [%.1f,%.1f]  ref @ %.1f MeV = %.4e +/- %.4e barn\n"
+           "       exp=%.4e +/- %.4e  scale=%.4e  (u_rel_scale=%.1f%%)\n",
+           E_norm, b, energy_bins[b], energy_bins[b+1],
+           p->E, p->sigma, p->u_sigma,
+           sig_b, u_sig_b, out.scale, 100.0*out.u_scale_rel);
+
+    return out;
 }

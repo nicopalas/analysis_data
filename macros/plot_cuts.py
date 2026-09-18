@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""
-plot_cuts.py
-============
-Load `events_gold` and `events_uranium` from coincidences.root and produce
-clear, publication-style plots of the cut variables, split by neutron-energy
-region (mirroring the step table in getCutsNominal, cuts.h).
-
-For each sample and each energy region it draws:
-  1. (amp0+amp1) vs (tof1-tof0)                  -- amplitude-sum cut lines + ROI
-  2. (amp1-amp0)/(amp0+amp1) vs (tof1-tof0)       -- ratio cut lines + ROI
-  3. 1-D histogram of tof1-tof0                   -- ROI / U-peak windows shaded
-
-Requires: uproot, numpy, matplotlib
-    pip install uproot numpy matplotlib
-
-Usage:
-    python plot_cuts.py --infile coincidences.root --outdir plots
-"""
 
 import argparse
 import os
@@ -37,20 +19,21 @@ _HALO = [pe.withStroke(linewidth=4.2, foreground="white")]
 #  ratio_max, ratio_min, upeak_min, upeak_max)
 # ---------------------------------------------------------------------------
 URANIUM_CUTS = [
-    ("E \u2265 1000 MeV",  1000, 2000, -5.0,  5.0,  8e3, 35e3, 0.1, -0.9, 0.0, 0.0),
-    ("500 \u2013 1000 MeV", 500, 1000, -4.0,  4.0, 13e3, 35e3, 0.0, -0.9, 0.0, 0.0),
-    ("100 \u2013 500 MeV",  100,  500, -4.0,  5.0, 13e3, 35e3, 0.1, -0.9, 0.0, 0.0),
-    ("10 \u2013 100 MeV",    10,  100, -5.5,  7.0, 10e3, 35e3, 0.1, -0.9, 0.0, 0.0),
-    ("E < 10 MeV",            0,   10, -5.0,  7.0,  8e3, 38e3, 0.1, -1.0, 0.0, 0.0),
+    ("E \u2265 1000 MeV",  1000, 2000, -5.0,   5.0,  14000, 34000,  0.1, -0.9,  0.0, 0.0),
+    ("500 \u2013 1000 MeV", 500, 1000, -3.0,   3.0,  14000, 34000,  0.0, -0.9,  0.0, 0.0),
+    ("100 \u2013 500 MeV",  100,  500, -4.0,   5.0,  13000, 35000,  0.1, -0.9,  0.0, 0.0),
+    ("10 \u2013 100 MeV",    10,  100, -5.5,   6.0,  10000, 35000,  0.1, -0.9,  0.0, 0.0),
+    ("E < 10 MeV",            0,   10, -5.0,   6.0,   9000, 38000,  0.1, -1.0,  0.0, 0.0),
 ]
 
 GOLD_CUTS = [
-    ("E \u2265 1000 MeV",  1000, 2000, -3.0,  3.0, 18e3, 37e3, 0.30, -0.7, -15.0, -3.0),
-    ("600 \u2013 1000 MeV", 600, 1000, -3.0,  2.5, 20e3, 37e3, 0.40, -0.7, -15.0, -3.0),
-    ("300 \u2013 600 MeV",  300,  600, -2.5,  2.5, 20e3, 35e3, 0.30, -0.6, -15.0, -3.0),
-    ("150 \u2013 300 MeV",  150,  300, -2.0,  2.3, 20e3, 35e3, 0.15, -0.7, -15.0, -2.5),
-    ("E < 150 MeV",          40,  150, -2.0,  2., 21e3, 35e3, 0.10, -0.6, -15.0, -2.5),
+    ("E \u2265 1000 MeV",   1000, 2000, -3.0,   3.2,  18000, 37000,  0.4, -0.7, -14.5, -3.0),
+    ("600 \u2013 1000 MeV",  600, 1000, -2.0,   3.0,  18000, 37000,  0.4, -0.5, -14.5, -3.0),
+    ("300 \u2013 600 MeV",   300,  600, -2.0,   2.5,  20000, 37000,  0.3, -0.5, -14.5, -3.0),
+    ("150 \u2013 300 MeV",   150,  300, -2.0,   2.3,  20000, 37000,  0.3, -0.5, -14.0, -3.0),
+    ("E < 150 MeV",           40,  150, -2.0,   2.2,  21000, 37000,  0.2, -0.4, -14.0, -2.5),
 ]
+
 
 SAMPLES = {
     "uranium": dict(tree="events_uranium", cuts=URANIUM_CUTS,
@@ -288,7 +271,7 @@ def make_grid_figure(data, cuts, plot_fn, suptitle, outpath, ncols=5, **kw):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--infile", default="/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection.root",
+    ap.add_argument("--infile", default="/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_exp.root",
                      help="path to coincidences.root")
     ap.add_argument("--outdir", default="plots", help="output directory")
     args = ap.parse_args()

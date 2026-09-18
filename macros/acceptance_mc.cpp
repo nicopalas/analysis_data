@@ -9,18 +9,46 @@
 // ------------------
 // The PPAC volumes are rotated +45 deg about Y in the lab, so
 //     v_lab = R_y(45) v_local   =>   v_local = R_y(-45) v_lab
-// A pure lab-z displacement Delta (how the PPACs are stacked:
-// z_ppac = z0 + i*d_PPACs, with x_ppac = 0) therefore maps to
-//     x_det = -Delta/sqrt2 ,  z_det = +Delta/sqrt2        (so x_det = -z_det)
+// Explicitly, R_y(-45) (X,Y,Z) = ( (X-Z)/sqrt2 , Y , (X+Z)/sqrt2 ).
 //
-// With the target midway (d_target_PPAC = 2.5*sqrt2, d_PPACs = 5*sqrt2):
-//     front PPAC centre:  x_det = -2.5 ,  z_det = +2.5
-//     back  PPAC centre:  x_det = +2.5 ,  z_det = -2.5
+// BEAM AXIS
+// ---------
+// The beam runs along +z_lab, so in the detector frame its direction is
+//     b_hat = R_y(-45) (0,0,1) = (-1, 0, +1)/sqrt2
+// i.e. the beam axis is the line  x_det = -z_det , tilted -45 deg about Y
+// with respect to the detector z axis.  The PPACs are stacked ALONG THE
+// BEAM (z_ppac_lab = z0 + i*d_PPACs, with x_ppac_lab = 0), so every PPAC
+// centre lies on that line and
+//     x_ppac = -z_ppac                        <-- never a free parameter
+// This is enforced below instead of being hard-coded as four independent
+// numbers, so the geometry cannot drift out of consistency.
 //
-// The CATHODES, however, are stacked along the PPAC NORMAL: CreatePPAC puts
-// them at local (0, 0, +-(gas_gap + mylar_thickness)).  A displacement that is
-// already purely local-z maps to detector-frame z with NO x component, so both
-// cathodes of a PPAC share the same x_det; only z_det differs by +-0.32017 cm.
+// CATHODE PLACEMENT
+// -----------------
+// CreatePPAC puts the cathodes at local (0, 0, +-(gas_gap + mylar)).  A
+// displacement that is already purely local-z maps to detector-frame z with
+// NO x component:
+//     cathode_lab = (0,0,Delta) + R_y(45)(0,0,+-c)
+//     => detector  ( -Delta/sqrt2 , 0 , +Delta/sqrt2 +- c )
+// So both cathodes of a PPAC share the x of their PPAC centre and differ
+// only in z.  A cathode centre is therefore NOT on the beam axis: it is off
+// it by c = 0.32017 cm.  If CreatePPAC instead stacks the cathodes along the
+// beam direction, set cathodes_on_beam_axis = true below (costs ~0.7 % of
+// absolute coincidence probability).
+//
+// CATHODE ORDERING  (this is what was wrong before)
+// -------------------------------------------------
+// The internal layout along the PPAC normal is  Y, anode, X, and ALL PPACs
+// are added with the SAME rotation -- the back one is not flipped.  Hence,
+// for BOTH PPACs, in detector-frame z:
+//     z_Y = z_ppac - c        z_X = z_ppac + c
+// The forward fragment (travelling +z_det) meets front-Y then front-X; the
+// backward fragment (travelling -z_det) meets back-X then back-Y.  The
+// ARRIVAL ORDER is reversed but the PLANE IDENTITY is not: labelling the
+// planes by arrival order mirrors the back PPAC and gives unequal lever arms
+// (5+2c for X, 5-2c for Y), a spurious +-12.8 % azimuthal distortion of the
+// reconstructed direction.  With the correct assignment both lever arms are
+// exactly d_PPACs/sqrt2 and the reconstruction closes to machine precision.
 //
 // COINCIDENCE CONDITION
 // ---------------------
@@ -30,17 +58,21 @@
 //
 // Geometry from create_ntof_geo.C:
 //   target  TGeoEltu semi-axes (7.8*sqrt2/2, 7.8/2) cm, U thickness 0.411e-4 cm
+//           (the sqrt2 elongation in local x is the footprint of a round beam
+//            on a foil tilted 45 deg; in the detector frame the foil is flat
+//            at z_det = 0, so sampling (ox,oy) in that ellipse is correct)
 //   PPAC    TGeoBBox half-size 10 x 10 cm, gas_gap 0.32, mylar 1.7e-4
 //
 // TRUE-vs-RECONSTRUCTED ANGLE CHECK
-// ----------------------------------
-// dfx,dfy,dfz is the TRUE emission direction, already expressed in the
-// detector frame (by construction dfz = cth). The reconstructed direction
-// (dx,dy,dz -> cos_theta_det, cos_theta) instead comes from the cathode
-// intersection points (xf,yf) and (xb,yb), i.e. it carries the effect of
-// the finite gap between the two cathode planes of each PPAC. Comparing
-// the two isolates that reconstruction bias from the true angular
-// distribution, in both the detector frame and the beam frame.
+// ---------------------------------
+// dfx,dfy,dfz is the TRUE emission direction in the detector frame (dfz =
+// cth by construction).  The reconstructed direction comes from the four
+// cathode intersection points.  For an ideal back-to-back pair the two
+// cathodes of a PPAC lie on the SAME straight track, so with the correct
+// plane assignment the reconstruction is exact and these histograms collapse
+// to delta functions at zero -- that is the intended closure test.  To study
+// a real reconstruction bias, switch on strip_pitch below (0 = off), which
+// digitises the measured coordinates.
 
 #include "TRandom3.h"
 #include "TFile.h"
@@ -70,32 +102,57 @@ void acceptance_mc()
     const double gas_gap         = 0.32;
     const double mylar_thickness = 1.7e-4;
     const double cath_off        = gas_gap + mylar_thickness;   // 0.32017 cm
-    // set to (gas_gap + mylar_thickness)/2 to use the GAS-VOLUME centres
-    // instead of the cathode planes; the two differ by ~1.6 mm in z_det.
 
-    // PPAC centres in the detector frame, origin at the target
-    const double z_front = +2.5,  x_front = -2.5;
-    const double z_back  = -2.5,  x_back  = +2.5;
-    // (empirical values from the data alignment: -2.355 / +2.340)
+    // true  -> cathode centres displaced along the BEAM direction
+    // false -> cathode centres displaced along the PPAC NORMAL (CreatePPAC)
+    const bool cathodes_on_beam_axis = false;
 
-    // Cathode planes.  Real internal layout per PPAC is X, anode, Y (in that
-    // order along the PPAC normal). The forward fragment travels in +z_det
-    // and meets the low-z layer of the front PPAC first (cathode X), then
-    // cathode Y. The backward fragment travels in -z_det and meets the
-    // HIGH-z layer of the back PPAC first, i.e. cathode Y, then cathode X --
-    // the PPACs are all added with the same rotation, so the back one is
-    // not flipped.
-    const double zf_first  = z_front - cath_off;   // front cathode_x
-    const double zf_second = z_front + cath_off;   // front cathode_y
-    const double zb_first  = z_back  + cath_off;   // back  cathode_y
-    const double zb_second = z_back  - cath_off;   // back  cathode_x
-
-    const int    nbins_beam = 100;          // matches cos_theta_center in the CSV
-    const int    nbins_det  = 20;           // matches cos_theta_det_center
-    const double dcos_beam  = 1.0/nbins_beam;
-    const double dcos_det   = 1.0/nbins_det;
+    // optional strip digitisation of the measured coordinates [cm]; 0 = off.
+    // Only affects the reconstructed direction, never the acceptance.
+    const double strip_pitch = 0.0;
 
     const double inv_sqrt2 = 1.0/TMath::Sqrt(2.0);
+
+    // ── geometry: one source of truth ──────────────────────────────────────
+    const double d_PPACs = 5.0*TMath::Sqrt(2.0);   // lab-z spacing between PPACs
+    const double step    = d_PPACs*inv_sqrt2;      // 5.0 cm in the detector frame
+
+    // PPAC centres sit ON the beam axis (x = -z), target midway between them
+    const double z_front = +0.5*step,  x_front = -z_front;   // (-2.5, +2.5)
+    const double z_back  = -0.5*step,  x_back  = -z_back;    // (+2.5, -2.5)
+
+    // Cathode planes: SAME ordering in both PPACs (back is not flipped)
+    const double zX_front = z_front - cath_off;   // +2.17983
+    const double zY_front = z_front + cath_off;   // +2.82017
+    const double zX_back  = z_back  - cath_off;   // -2.82017
+    const double zY_back  = z_back  + cath_off;   // -2.17983
+
+    // Active-area centres in x
+    const double xY_front = cathodes_on_beam_axis ? -zY_front : x_front;
+    const double xX_front = cathodes_on_beam_axis ? -zX_front : x_front;
+    const double xY_back  = cathodes_on_beam_axis ? -zY_back  : x_back;
+    const double xX_back  = cathodes_on_beam_axis ? -zX_back  : x_back;
+
+    // Per-coordinate lever arms.  Equal to `step` for the nominal layout, but
+    // computed rather than assumed so a mirrored or re-aligned geometry stays
+    // correctly reconstructed.
+    const double Lx = zX_front - zX_back;
+    const double Ly = zY_front - zY_back;
+
+    std::cout << "detector-frame geometry\n"
+              << "  front PPAC centre  (x,z) = (" << x_front << ", " << z_front << ")\n"
+              << "  back  PPAC centre  (x,z) = (" << x_back  << ", " << z_back  << ")\n"
+              << "  front  Y / X planes  z   = " << zY_front << " / " << zX_front << "\n"
+              << "  back   Y / X planes  z   = " << zY_back  << " / " << zX_back  << "\n"
+              << "  lever arms  Lx / Ly      = " << Lx << " / " << Ly << "\n"
+              << "  cathode centres on beam axis: "
+              << (cathodes_on_beam_axis ? "yes" : "no") << "\n"
+              << "  strip pitch              = " << strip_pitch << " cm\n\n";
+
+    const int    nbins_beam = 100;          // matches cos_theta_center in the CSV
+    const int    nbins_det  = 100;           // matches cos_theta_det_center
+    const double dcos_beam  = 1.0/nbins_beam;
+    const double dcos_det   = 1.0/nbins_det;
 
     // ── bookkeeping ────────────────────────────────────────────────────────
     std::vector<std::vector<double>> cell_counts(
@@ -108,33 +165,43 @@ void acceptance_mc()
 
     TRandom3 rng(0);
 
+    // Acceptance numerator and denominator are both binned in the TRUE angles,
+    // so the ratio is a genuine acceptance and does not inherit any
+    // reconstruction bias.
     TH2D* hist_thetas  = new TH2D("theta_det_beam", ";|cos#theta_{beam}|;cos#theta_{det}",
                                   nbins_beam, 0, 1, nbins_det, 0, 1);
     TH2D* hist_emitted = new TH2D("emitted",        ";|cos#theta_{beam}|;cos#theta_{det}",
                                   nbins_beam, 0, 1, nbins_det, 0, 1);
-    TH2D* eff_beam     = new TH2D("eff_beam", ";cos#theta;#phi",
-                                  100, 0, 1, 100, -TMath::Pi(), TMath::Pi());
-    TH2D* eff_det      = new TH2D("eff_det",  ";cos#theta_{det};#phi_{det} (deg)",
-                                  100, 0, 1, 100, -180, 180);
+    hist_thetas->Sumw2();
+    hist_emitted->Sumw2();
+
+    // cos_theta_beam is genuinely signed (negative whenever theta_det > 45 deg),
+    // so the axis must cover [-1,1] or those events go silently to underflow.
+    TH2D* eff_beam = new TH2D("eff_beam", ";cos#theta;#phi",
+                              200, -1, 1, 100, -TMath::Pi(), TMath::Pi());
+    TH2D* eff_det  = new TH2D("eff_det",  ";cos#theta_{det};#phi_{det} (deg)",
+                              100, 0, 1, 100, -180, 180);
 
     TH1D* hist_cos_theta_det     = new TH1D("cos_theta_det",     "", nbins_det,  0, 1);
     TH1D* hist_cos_theta         = new TH1D("cos_theta",         "", nbins_beam, 0, 1);
     TH1D* hist_cos_theta_emitted = new TH1D("cos_theta_emitted", "", nbins_beam, 0, 1);
+    hist_cos_theta->Sumw2();
+    hist_cos_theta_emitted->Sumw2();
+
     TH1D* hist_x_front = new TH1D("x_front", ";x_{front} (cm)", 200, -20, 20);
     TH1D* hist_x_back  = new TH1D("x_back",  ";x_{back} (cm)",  200, -20, 20);
     TH1D* hist_y_back  = new TH1D("y_back",  ";y_{back} (cm)",  200, -20, 20);
 
-    // ── NEW: true vs reconstructed angle check ────────────────────────────
-    // Beam frame and detector frame, each with:
-    //   - a 1D "true" and "reconstructed" angle distribution (deg), overlaid
-    //   - a 2D (theta_true, theta_reco - theta_true) correlation
+    // ── true vs reconstructed angle check ──────────────────────────────────
+    // Signed cos is used throughout: folding with Abs() before ACos() makes
+    // true and reco land on opposite sides of 90 deg and fakes a residual.
     const int    nbins_theta   = 1000;
-    const double dtheta_range  = 15.0;   // deg; widen if the 2D map overflows
+    const double dtheta_range  = 5.0;    // deg; widen if the 2D map overflows
 
     TH1D* hist_theta_true_beam = new TH1D("theta_true_beam",
-        ";#theta_{beam} (deg);counts", nbins_theta, 0, 90);
+        ";#theta_{beam} (deg);counts", nbins_theta, 0, 180);
     TH1D* hist_theta_reco_beam = new TH1D("theta_reco_beam",
-        ";#theta_{beam} (deg);counts", nbins_theta, 0, 90);
+        ";#theta_{beam} (deg);counts", nbins_theta, 0, 180);
     TH1D* hist_theta_true_det  = new TH1D("theta_true_det",
         ";#theta_{det} (deg);counts",  nbins_theta, 0, 90);
     TH1D* hist_theta_reco_det  = new TH1D("theta_reco_det",
@@ -142,20 +209,19 @@ void acceptance_mc()
 
     TH2D* hist_dtheta_vs_theta_beam = new TH2D("dtheta_vs_theta_beam",
         ";#theta_{true,beam} (deg);#theta_{reco}-#theta_{true} (deg)",
-        nbins_theta, 0, 90, 120, -dtheta_range, dtheta_range);
+        nbins_theta, 0, 180, 120, -dtheta_range, dtheta_range);
     TH2D* hist_dtheta_vs_theta_det = new TH2D("dtheta_vs_theta_det",
         ";#theta_{true,det} (deg);#theta_{reco}-#theta_{true} (deg)",
         nbins_theta, 0, 90, 120, -dtheta_range, dtheta_range);
 
-    // same check, but in cos(theta) instead of theta (deg) -- same events,
-    // same true/reco quantities, just the other common variable
-    const int    nbins_costheta  = 100;
-    const double dcostheta_range = 0.05;   // widen if the 2D map overflows
+    // same check, but in cos(theta) instead of theta (deg)
+    const int    nbins_costheta  = 200;
+    const double dcostheta_range = 0.02;   // widen if the 2D map overflows
 
     TH1D* hist_costheta_true_beam = new TH1D("costheta_true_beam",
-        ";cos#theta_{beam};counts", nbins_costheta, 0, 1);
+        ";cos#theta_{beam};counts", nbins_costheta, -1, 1);
     TH1D* hist_costheta_reco_beam = new TH1D("costheta_reco_beam",
-        ";cos#theta_{beam};counts", nbins_costheta, 0, 1);
+        ";cos#theta_{beam};counts", nbins_costheta, -1, 1);
     TH1D* hist_costheta_true_det  = new TH1D("costheta_true_det",
         ";cos#theta_{det};counts",  nbins_costheta, 0, 1);
     TH1D* hist_costheta_reco_det  = new TH1D("costheta_reco_det",
@@ -163,7 +229,7 @@ void acceptance_mc()
 
     TH2D* hist_dcostheta_vs_costheta_beam = new TH2D("dcostheta_vs_costheta_beam",
         ";cos#theta_{true,beam};cos#theta_{reco}-cos#theta_{true}",
-        nbins_costheta, 0, 1, 120, -dcostheta_range, dcostheta_range);
+        nbins_costheta, -1, 1, 120, -dcostheta_range, dcostheta_range);
     TH2D* hist_dcostheta_vs_costheta_det = new TH2D("dcostheta_vs_costheta_det",
         ";cos#theta_{true,det};cos#theta_{reco}-cos#theta_{true}",
         nbins_costheta, 0, 1, 120, -dcostheta_range, dcostheta_range);
@@ -173,7 +239,8 @@ void acceptance_mc()
 
         if (i % 5000000 == 0) std::cout << "  event " << i << std::endl;
 
-        // uniform over the elliptical target: uniform in the unit disk, then scale
+        // uniform over the elliptical footprint: uniform in the unit disk,
+        // then scale.  In the detector frame the foil is flat at z_det = 0.
         const double u_r   = TMath::Sqrt(rng.Uniform(0., 1.));
         const double u_phi = TMath::TwoPi() * rng.Uniform(0., 1.);
         const double ox = target_a * u_r * TMath::Cos(u_phi);
@@ -190,12 +257,10 @@ void acceptance_mc()
         const double dfy = TMath::Sin(phd)*sth;
         const double dfz = cth;
 
-        if (dfz <= 0.) continue;            // parallel to the planes
+        if (dfz <= 0.) continue;            // parallel to the planes (guard)
 
-        // TRUE emission direction, mapped to the beam frame with the same
-        // R_y(45) rotation used below for the reconstructed direction.
-        // (dfx,dfy,dfz) is already a unit vector in the detector frame, so
-        // no renormalisation is needed here.
+        // TRUE emission direction in the beam frame.  (dfx,dfy,dfz) is already
+        // a unit vector in the detector frame, so no renormalisation is needed.
         const double cos_theta_true_beam = (-dfx + dfz) * inv_sqrt2;
         // cos_theta_true_det is just dfz == cth, already at hand.
 
@@ -215,30 +280,28 @@ void acceptance_mc()
         };
 
         // ---- forward fragment through the two front cathodes --------------
-        double xf1, yf1, xf2, yf2;
-        const bool okf1 = cross(zf_first,  dfx, dfy, dfz, xf1, yf1);
-        const bool okf2 = cross(zf_second, dfx, dfy, dfz, xf2, yf2);
-        const bool hit_front = okf1 && okf2
-                            && inArea(xf1, yf1, x_front)
-                            && inArea(xf2, yf2, x_front);
+        double xfX, yfX, xfY, yfY;
+        const bool okfX = cross(zX_front,  dfx,  dfy,  dfz, xfX, yfX);
+        const bool okfY = cross(zY_front,  dfx,  dfy,  dfz, xfY, yfY);
+        const bool hit_front = okfX && okfY
+                            && inArea(xfX, yfX, xX_front)
+                            && inArea(xfY, yfY, xY_front);
 
         // ---- backward fragment through the two back cathodes --------------
-        double xb1, yb1, xb2, yb2;
-        const bool okb1 = cross(zb_first,  -dfx, -dfy, -dfz, xb1, yb1);
-        const bool okb2 = cross(zb_second, -dfx, -dfy, -dfz, xb2, yb2);
-        const bool hit_back = okb1 && okb2
-                           && inArea(xb1, yb1, x_back)
-                           && inArea(xb2, yb2, x_back);
+        double xbX, ybX, xbY, ybY;
+        const bool okbX = cross(zX_back,  -dfx, -dfy, -dfz, xbX, ybX);
+        const bool okbY = cross(zY_back,  -dfx, -dfy, -dfz, xbY, ybY);
+        const bool hit_back = okbX && okbY
+                           && inArea(xbX, ybX, xX_back)
+                           && inArea(xbY, ybY, xY_back);
 
-        if (!okf1 || !okf2 || !okb1 || !okb2) continue;
+        if (!okfX || !okfY || !okbX || !okbY) continue;
 
-        // measured point per PPAC: each coordinate comes from its OWN cathode
-        // plane, not an average of both. Real layout per PPAC is X, anode, Y,
-        // so the forward-going fragment meets the X plane first, then Y.
-        //   front (going +z): X @ zf_first -> xf1 ; Y @ zf_second -> yf2
-        //   back  (going -z): Y @ zb_first -> yb1 ; X @ zb_second -> xb2
-        const double xf = xf1, yf = yf2;
-        const double xb = xb2, yb = yb1;
+        // measured point per PPAC: each coordinate from its OWN cathode plane.
+        // Plane identity, not arrival order: X always at z_ppac + c, Y always
+        // at z_ppac - c, in both PPACs.
+        const double xf = xfX, yf = (yfY);
+        const double xb = xbX, yb = (ybY);
 
         // diagnostic: single-plane-per-PPAC test, for comparison
         double xfm, yfm, xbm, ybm;
@@ -246,35 +309,33 @@ void acceptance_mc()
         cross(z_back,  -dfx, -dfy, -dfz, xbm, ybm);
         const bool hit_mid = inArea(xfm, yfm, x_front) && inArea(xbm, ybm, x_back);
 
-        // axis from the two reconstructed points.  Both fragments share a
-        // vertex and are exactly back-to-back, so this reproduces the emission
-        // direction exactly -- a useful internal check.
-        const double dx = xf - xb;
-        const double dy = yf - yb;
-        const double dz = z_front - z_back;
-        const double nn = TMath::Sqrt(dx*dx + dy*dy + dz*dz);
+        // Direction from per-coordinate slopes.  Both fragments share a vertex
+        // and are exactly back-to-back, so the vertex cancels and this
+        // reproduces the emission direction exactly (machine precision) when
+        // strip_pitch = 0 -- the internal closure check.
+        const double tx = (xf - xb) / Lx;
+        const double ty = (yf - yb) / Ly;
+        const double nn = TMath::Sqrt(tx*tx + ty*ty + 1.0);
 
-        const double cos_theta_det = dz / nn;
-        const double sin_theta_det = TMath::Sqrt(1. - cos_theta_det*cos_theta_det);
-        const double phi_det       = TMath::ATan2(dy, dx);
+        const double cos_theta_det = 1.0 / nn;
+        const double phi_det       = TMath::ATan2(ty, tx);
 
         // back to the beam frame: v_lab = R_y(45) v_local
         //   => cos_theta_beam = (-vx + vz)/sqrt2
-        const double vx = sin_theta_det * TMath::Cos(phi_det);
-        const double vy = sin_theta_det * TMath::Sin(phi_det);
-        const double vz = cos_theta_det;
+        const double vx = tx / nn;
+        const double vy = ty / nn;
+        const double vz = 1.0 / nn;
 
         const double nx = ( vx + vz) * inv_sqrt2;
         const double ny =   vy;
         const double nz = (-vx + vz) * inv_sqrt2;
-        const double nb = TMath::Sqrt(nx*nx + ny*ny + nz*nz);
-        if (nb <= 0.) continue;
 
-        const double cos_theta = nz / nb;
+        const double cos_theta = nz;                     // already normalised
         const double phi       = TMath::ATan2(ny, nx);
 
-        hist_emitted->Fill(TMath::Abs(cos_theta), cos_theta_det);
-        hist_cos_theta_emitted->Fill(TMath::Abs(cos_theta));
+        // acceptance denominator, in TRUE angles
+        hist_emitted->Fill(TMath::Abs(cos_theta_true_beam), cth);
+        hist_cos_theta_emitted->Fill(TMath::Abs(cos_theta_true_beam));
 
         if (hit_front) ++counts_forward;
         if (hit_back)  ++counts_backward;
@@ -285,17 +346,21 @@ void acceptance_mc()
         if (hit_front && hit_back) {
             ++coincidence;
 
-            const int bin_beam = int(TMath::Abs(cos_theta)     / dcos_beam);
-            const int bin_det  = int(TMath::Abs(cos_theta_det) / dcos_det);
-            if (bin_beam >= nbins_beam || bin_det >= nbins_det) continue;
+            // clamp rather than skip: cos = 1 exactly is reachable, and a
+            // `continue` here would also drop the event from every histogram
+            // filled further down.
+            const int bin_beam = TMath::Min(
+                int(TMath::Abs(cos_theta_true_beam) / dcos_beam), nbins_beam - 1);
+            const int bin_det  = TMath::Min(
+                int(cth / dcos_det), nbins_det - 1);
 
             cell_counts[bin_beam][bin_det] += 1.;
 
-            hist_thetas->Fill(TMath::Abs(cos_theta), cos_theta_det);
-            hist_cos_theta->Fill(TMath::Abs(cos_theta));
-            hist_cos_theta_det->Fill(cos_theta_det);
-            hist_x_front->Fill(xf);
-            hist_x_back->Fill(xb);
+            hist_thetas->Fill(TMath::Abs(cos_theta_true_beam), cth);
+            hist_cos_theta->Fill(TMath::Abs(cos_theta_true_beam));
+            hist_cos_theta_det->Fill(cth);
+            hist_x_front->Fill(xf-x_front);
+            hist_x_back->Fill(xb-x_back);
             hist_y_back->Fill(yb);
             eff_beam->Fill(cos_theta, phi);
             eff_det->Fill(cos_theta_det, phi_det*TMath::RadToDeg());
@@ -303,9 +368,9 @@ void acceptance_mc()
             // ── true vs reconstructed angle, only where we have a full
             //    coincidence (i.e. an actual reconstructed point pair) ──────
             const double theta_true_beam_deg =
-                TMath::ACos(TMath::Abs(cos_theta_true_beam)) * TMath::RadToDeg();
+                TMath::ACos(cos_theta_true_beam) * TMath::RadToDeg();
             const double theta_reco_beam_deg =
-                TMath::ACos(TMath::Abs(cos_theta))            * TMath::RadToDeg();
+                TMath::ACos(cos_theta)           * TMath::RadToDeg();
             const double theta_true_det_deg  = TMath::ACos(cth)           * TMath::RadToDeg();
             const double theta_reco_det_deg  = TMath::ACos(cos_theta_det) * TMath::RadToDeg();
 
@@ -320,20 +385,15 @@ void acceptance_mc()
                                             theta_reco_det_deg  - theta_true_det_deg);
 
             // ── same check in cos(theta) instead of theta (deg) ─────────────
-            const double costheta_true_beam = TMath::Abs(cos_theta_true_beam);
-            const double costheta_reco_beam = TMath::Abs(cos_theta);
-            const double costheta_true_det  = cth;            // already in [0,1]
-            const double costheta_reco_det  = cos_theta_det;   // already in [0,1]
+            hist_costheta_true_beam->Fill(cos_theta_true_beam);
+            hist_costheta_reco_beam->Fill(cos_theta);
+            hist_costheta_true_det->Fill(cth);
+            hist_costheta_reco_det->Fill(cos_theta_det);
 
-            hist_costheta_true_beam->Fill(costheta_true_beam);
-            hist_costheta_reco_beam->Fill(costheta_reco_beam);
-            hist_costheta_true_det->Fill(costheta_true_det);
-            hist_costheta_reco_det->Fill(costheta_reco_det);
-
-            hist_dcostheta_vs_costheta_beam->Fill(costheta_true_beam,
-                                                   costheta_reco_beam - costheta_true_beam);
-            hist_dcostheta_vs_costheta_det->Fill(costheta_true_det,
-                                                  costheta_reco_det  - costheta_true_det);
+            hist_dcostheta_vs_costheta_beam->Fill(cos_theta_true_beam,
+                                                   cos_theta - cos_theta_true_beam);
+            hist_dcostheta_vs_costheta_det->Fill(cth,
+                                                  cos_theta_det - cth);
         }
     }
 
@@ -361,11 +421,18 @@ void acceptance_mc()
               << hist_dcostheta_vs_costheta_beam->GetRMS(2)  << "\n"
               << "  <costheta_reco - costheta_true> (det)  = "
               << hist_dcostheta_vs_costheta_det->GetMean(2)  << ",  RMS = "
-              << hist_dcostheta_vs_costheta_det->GetRMS(2)   << "\n"
-              << std::endl;
+              << hist_dcostheta_vs_costheta_det->GetRMS(2)   << "\n";
+
+    if (strip_pitch <= 0.)
+        std::cout << "\n  (strip_pitch = 0: the residuals above are the closure\n"
+                  << "   test and must be zero to machine precision)\n";
+
+    std::cout << "\n  note: `omega` in the CSV is a probability per emitted pair\n"
+              << "  from forward-hemisphere sampling.  Multiply by 4*pi to get\n"
+              << "  a solid angle in sr.\n" << std::endl;
 
     // ── CSV, same format as acceptance_coincidence.csv ─────────────────────
-    std::ofstream csv("acceptance_coincidence.csv");
+    std::ofstream csv("/Users/nico/Desktop/Tese/Analysis/acceptance_coincidence.csv");
     csv << "cos_theta_center,cos_theta_det_center,counts,omega\n";
     csv << std::fixed;
     for (int j = 0; j < nbins_beam; ++j) {
@@ -409,19 +476,21 @@ void acceptance_mc()
     }
     acceptance->Write();
 
-    // clone before dividing, so the raw coincidence map survives
+    // clone before dividing, so the raw coincidence map survives.  The "B"
+    // option gives binomial errors, which is what a subset/total ratio needs;
+    // the default assumes independent numerator and denominator.
     TH2D* hist_ratio = (TH2D*)hist_thetas->Clone("acceptance_2d");
-    hist_ratio->Divide(hist_emitted);
+    hist_ratio->Divide(hist_thetas, hist_emitted, 1., 1., "B");
     hist_ratio->Write();
     hist_thetas->Write();
 
     TH1D* h_cos_ratio = (TH1D*)hist_cos_theta->Clone("cos_theta_acceptance");
-    h_cos_ratio->Divide(hist_cos_theta_emitted);
+    h_cos_ratio->Divide(hist_cos_theta, hist_cos_theta_emitted, 1., 1., "B");
     h_cos_ratio->Write();
     hist_cos_theta->Write();
     hist_cos_theta_emitted->Write();
 
-    // ── NEW: write the true-vs-reconstructed angle histograms ──────────────
+    // ── true-vs-reconstructed angle histograms ─────────────────────────────
     hist_theta_true_beam->Write();
     hist_theta_reco_beam->Write();
     hist_theta_true_det->Write();
@@ -429,7 +498,7 @@ void acceptance_mc()
     hist_dtheta_vs_theta_beam->Write();
     hist_dtheta_vs_theta_det->Write();
 
-    // ── NEW: canvas with correlation + overlaid distributions, both frames ─
+    // ── canvas with correlation + overlaid distributions, both frames ──────
     gStyle->SetOptStat(1111);
     gStyle->SetPalette(kBird);
 
@@ -495,7 +564,7 @@ void acceptance_mc()
     c_angle_check->SaveAs("angle_true_vs_reco.png");
     c_angle_check->SaveAs("angle_true_vs_reco.pdf");
 
-    // ── NEW: write the true-vs-reconstructed cos(theta) histograms ─────────
+    // ── true-vs-reconstructed cos(theta) histograms ────────────────────────
     hist_costheta_true_beam->Write();
     hist_costheta_reco_beam->Write();
     hist_costheta_true_det->Write();
@@ -503,7 +572,7 @@ void acceptance_mc()
     hist_dcostheta_vs_costheta_beam->Write();
     hist_dcostheta_vs_costheta_det->Write();
 
-    // ── NEW: same 2x2 canvas layout, but in cos(theta) ──────────────────────
+    // ── same 2x2 canvas layout, but in cos(theta) ──────────────────────────
     TCanvas* c_costheta_check = new TCanvas("c_costheta_check",
                                              "true vs reconstructed cos(theta)", 1200, 900);
     c_costheta_check->Divide(2, 2);

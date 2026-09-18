@@ -19,6 +19,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include "../include/fit_anisotropy.h"
 
 // ========================================================================
 // House style for all publication figures in this analysis.
@@ -127,7 +128,7 @@ static void plotBackgroundFits(
         hists_tof[i]->SetLineColor(kBkgColor);
         hists_tof[i]->SetMarkerColor(kBkgColor);
         hists_tof[i]->SetMarkerStyle(20);
-        hists_tof[i]->SetMarkerSize(0.2);
+        hists_tof[i]->SetMarkerSize(0.8);
         hists_tof[i]->GetXaxis()->SetTitleOffset(1.1);
         hists_tof[i]->GetYaxis()->SetTitleOffset(1.4);
         hists_tof[i]->Draw("PE");
@@ -349,7 +350,7 @@ static void plotAnisotropy(
         g->SetTitle(";cos(#theta_{beam});W(#theta) / W(90^{#circ})");
         g->GetXaxis()->SetLimits(0.0, 1.0);
         g->SetMinimum(0.4);
-        g->SetMaximum(2.5);
+        g->SetMaximum(2.);
         g->GetXaxis()->SetTitleOffset(1.05);
         g->GetYaxis()->SetTitleOffset(1.35);
         g->Draw("AP");
@@ -413,7 +414,7 @@ static void plotAnisotropyRatio(
     g->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
     g->GetXaxis()->SetTitleOffset(1.2);
     g->GetYaxis()->SetTitleOffset(1.3);
-    g->GetYaxis()->SetRangeUser(0.5, 2.2);
+    g->GetYaxis()->SetRangeUser(0.5, 2.0);
     g->GetXaxis()->SetMoreLogLabels();
     g->GetXaxis()->SetNoExponent();
     g->Draw("AP");
@@ -603,6 +604,7 @@ static ExforData loadExforAniso(const ExforSource& src)
 
     out.graph = new TGraphErrors((int)ex.size(),
         ex.data(), ey.data(), ex_err.data(), ey_err.data());
+    out.graph->GetYaxis()->SetRangeUser(0.5, 2.0);
 
     if(!src.label.empty()){
         out.label = src.label;
@@ -722,7 +724,7 @@ static void plotAnisoVsExfor(
 
     // this work: filled navy square, drawn last (foreground)
     g_this->SetMarkerStyle(21);
-    g_this->SetMarkerSize(1.);
+    g_this->SetMarkerSize(2.);
     g_this->SetMarkerColor(kThisWorkColor);
     g_this->SetLineColor(kThisWorkColor);
     g_this->SetLineWidth(2);
@@ -868,7 +870,7 @@ static void plotPullsVsExfor(
  
         if(p.graph){
             p.graph->SetMarkerStyle(24);
-            p.graph->SetMarkerSize(0.5);
+            p.graph->SetMarkerSize(1.);
             p.graph->SetMarkerColor(color);
             p.graph->SetLineColor(color);
             p.graph->Draw("P SAME");
@@ -1022,7 +1024,7 @@ static void plotAnisoVsExforIndividual(
         exfor[k].graph->Draw("P SAME");
  
         g_this->SetMarkerStyle(21);
-        g_this->SetMarkerSize(0.2);
+        g_this->SetMarkerSize(0.5);
         g_this->SetMarkerColor(kThisWorkColor);
         g_this->SetLineColor(kThisWorkColor);
         g_this->Draw("P SAME");
@@ -1040,4 +1042,206 @@ static void plotAnisoVsExforIndividual(
         }
     }
     c->SaveAs(outname.c_str());
+}
+// ------------------------------------------------------------------------
+// W(cos theta)/W(90) per energy bin: measured points + Legendre fit curve.
+// Points are normalised with the *fitted* W(90), so points and curve share
+// the same normalisation. step > 1 draws only every step-th energy bin.
+// ------------------------------------------------------------------------
+static double legendreRatioCurve(double* x, double* p)
+{
+    double c = x[0];
+    double N = 1. + p[0]*legP2(c)  + p[1]*legP4(c);
+    double D = 1. + p[0]*legP2(0.) + p[1]*legP4(0.);
+    return N / D;
+}
+
+static void plotAnisotropyFit(
+    const std::vector<LegendreResult>& leg,
+    const std::vector<double>& energy_bins,
+    const std::string& outname,
+    int step = 1)
+{
+    setPubStyle();
+
+    std::vector<int> sel;
+    for(int e = 0; e < (int)leg.size(); e += std::max(step, 1))
+        if(leg[e].valid && leg[e].W90 > 0.) sel.push_back(e);
+    if(sel.empty()){
+        std::cerr << "[WARN] plotAnisotropyFit: no valid fits to draw\n";
+        return;
+    }
+
+    int ncol, nrow;
+    gridLayout((int)sel.size(), ncol, nrow);
+
+    TCanvas* c = new TCanvas("c_aniso_fit", "Anisotropy fits", 480*ncol, 420*nrow);
+    c->Divide(ncol, nrow, 0.0002, 0.0002);
+
+    for(size_t p = 0; p < sel.size(); ++p){
+        int e = sel[p];
+        const LegendreResult& L = leg[e];
+
+        int n = (int)L.w.size();
+        std::vector<double> y(n), ey(n), ex(n, 0.0);
+        double ymin = 1e9, ymax = -1e9;
+        for(int k = 0; k < n; ++k){
+            y[k]  = L.w[k]   / L.W90;
+            ey[k] = L.u_w[k] / L.W90;
+            ymin = std::min(ymin, y[k] - ey[k]);
+            ymax = std::max(ymax, y[k] + ey[k]);
+        }
+        ymin = std::min(ymin, 1.0);
+        ymax = std::max(ymax, L.anisotropy);
+        double margin = 0.15 * (ymax - ymin);
+        ymin = std::max(0.0, ymin - margin);
+        ymax = ymax + 2.5 * margin;             // headroom for labels
+
+        TVirtualPad* pad = c->cd((int)p + 1);
+        stylePad(pad);
+        pad->SetLeftMargin(0.18);
+        pad->SetBottomMargin(0.16);
+
+        TH1F* frame = pad->DrawFrame(0.0, ymin, 1.0, ymax);
+        frame->GetXaxis()->SetTitle("cos(#theta_{beam})");
+        frame->GetYaxis()->SetTitle("W(#theta) / W(90^{#circ})");
+        frame->GetXaxis()->SetTitleOffset(1.05);
+        frame->GetYaxis()->SetTitleOffset(1.35);
+
+        TLine* ref = new TLine(0.0, 1.0, 1.0, 1.0);
+        ref->SetLineStyle(2);
+        ref->SetLineColor(kGray + 1);
+        ref->Draw();
+
+        TF1* f = new TF1(Form("f_legfit_%d", e), legendreRatioCurve, 0., 1., 2);
+        f->SetParameters(L.a2, L.a4);
+        f->SetLineColor(kBkgFitColor);
+        f->SetLineWidth(2);
+        f->SetNpx(200);
+        f->Draw("SAME");
+
+        TGraphErrors* g = new TGraphErrors(
+            n, L.cos_theta.data(), y.data(), ex.data(), ey.data());
+        g->SetMarkerStyle(20);
+        g->SetMarkerSize(1.5);
+        g->SetMarkerColor(kAnisoColor);
+        g->SetLineColor(kAnisoColor);
+        g->SetLineWidth(2);
+        g->Draw("P SAME");
+
+        TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
+        lat.SetTextAlign(33);
+        lat.SetTextSize(0.060);
+        lat.DrawLatex(0.94, 0.90,
+            Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]));
+        lat.SetTextAlign(13);
+        lat.SetTextSize(0.048);
+        lat.DrawLatex(0.22, 0.90, Form("a_{2} = %.3f #pm %.3f", L.a2, L.u_a2));
+        lat.DrawLatex(0.22, 0.83, Form("W(0)/W(90) = %.3f #pm %.3f",
+                                       L.anisotropy, L.u_anisotropy));
+        lat.DrawLatex(0.22, 0.76, Form("#chi^{2}/ndf = %.2f", L.chi2ndf));
+
+        pad->RedrawAxis();
+    }
+    c->SaveAs(outname.c_str());
+}
+
+// ------------------------------------------------------------------------
+// W(0)/W(90) from the Legendre fit vs neutron energy.
+// Saves <outname>.pdf and <outname>.root (graph "anisotropy_ratio") and
+// returns the graph, ready for plotAnisoVsExfor / plotPulls*.
+// ------------------------------------------------------------------------
+static TGraphErrors* plotAnisotropyRatioFit(
+    const std::vector<LegendreResult>& leg,
+    const std::vector<double>& energy_bins,
+    const std::string& outname,
+    const std::string& reaction_label = "W(0^{#circ})/W(90^{#circ})")
+{
+    setPubStyle();
+
+    std::vector<double> x, y, ex, ey;
+    for(int e = 0; e < (int)leg.size(); ++e){
+        if(!leg[e].valid) continue;
+        x .push_back(std::sqrt(energy_bins[e] * energy_bins[e+1]));
+        ex.push_back(0.0);
+        y .push_back(leg[e].anisotropy);
+        ey.push_back(leg[e].u_anisotropy);
+    }
+    if(x.empty()){
+        std::cerr << "[WARN] plotAnisotropyRatioFit: no valid fits\n";
+        return nullptr;
+    }
+
+    TGraphErrors* g = new TGraphErrors(
+        (int)x.size(), x.data(), y.data(), ex.data(), ey.data());
+    g->SetName("anisotropy_ratio");
+    g->SetMarkerStyle(20);
+    g->SetMarkerSize(1.5);
+    g->SetMarkerColor(kRatioColor);
+    g->SetLineColor(kRatioColor);
+    g->SetLineWidth(1);
+
+    double ymin = 1e9, ymax = -1e9;
+    for(size_t i = 0; i < y.size(); ++i){
+        ymin = std::min(ymin, y[i] - ey[i]);
+        ymax = std::max(ymax, y[i] + ey[i]);
+    }
+    ymin = std::min(ymin, 0.95);
+    ymax = std::max(ymax, 1.05);
+    double margin = 0.15 * (ymax - ymin);
+    ymin -= margin;
+    ymax += 2.0 * margin;
+
+    double xmin = energy_bins.front(), xmax = energy_bins.back();
+
+    TCanvas* c = new TCanvas("c_ratio_fit", "", 800, 650);
+    c->SetLogx();
+    stylePad(gPad);
+    c->SetLeftMargin(0.13);
+    c->SetBottomMargin(0.13);
+
+    TH1F* frame = c->DrawFrame(xmin, ymin, xmax, ymax);
+    frame->GetXaxis()->SetTitle("Neutron energy  E_{n}  (MeV)");
+    frame->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
+    frame->GetXaxis()->SetTitleOffset(1.2);
+    frame->GetYaxis()->SetTitleOffset(1.3);
+    frame->GetXaxis()->SetMoreLogLabels();
+    frame->GetXaxis()->SetNoExponent();
+
+    TGraph* band = new TGraph(4);
+    band->SetPoint(0, xmin, 1.05);
+    band->SetPoint(1, xmax, 1.05);
+    band->SetPoint(2, xmax, 0.95);
+    band->SetPoint(3, xmin, 0.95);
+    band->SetFillColorAlpha(kGray, 0.25);
+    band->SetLineWidth(0);
+    band->Draw("F SAME");
+
+    TLine* line = new TLine(xmin, 1.0, xmax, 1.0);
+    line->SetLineStyle(7);
+    line->SetLineColor(kGray+1);
+    line->SetLineWidth(2);
+    line->Draw();
+
+    g->Draw("P SAME");
+
+    TLegend* lg = new TLegend(0.50, 0.74, 0.93, 0.93);
+    lg->SetBorderSize(0);
+    lg->SetFillStyle(0);
+    lg->AddEntry(g,    (reaction_label + "  (Legendre fit)").c_str(), "lp");
+    lg->AddEntry(line, "Isotropic",   "l");
+    lg->AddEntry(band, "#pm5% band",  "f");
+    lg->Draw();
+
+    c->RedrawAxis();
+    c->SaveAs((outname + ".pdf").c_str());
+
+    TFile* fout = TFile::Open((outname + ".root").c_str(), "RECREATE");
+    if(fout && !fout->IsZombie()){
+        g->Write("anisotropy_ratio");
+        fout->Close();
+    } else {
+        std::cerr << "[ERROR] Cannot create " << outname << ".root\n";
+    }
+    return g;
 }

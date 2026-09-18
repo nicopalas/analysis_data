@@ -5,7 +5,6 @@
 #include "../include/cuts.h"
 #include "../include/acceptance.h"
 #include "../include/efficiency.h"
-#include "../include/efficiency_no_overlap.h"
 
 #include "TFile.h"
 #include "TTree.h"
@@ -13,10 +12,13 @@
 #include "TGraphErrors.h"
 #include "TCanvas.h"
 #include "TLegend.h"
+#include "TLine.h"
 #include "TMath.h"
 #include <iostream>
 #include <vector>
+#include <string>
 #include <cmath>
+#include <algorithm>
 
 static inline int cosBin(double c, int nbins)
 {
@@ -47,8 +49,18 @@ static void poissonErrors(McCounts& m)
                 m.u_n[e][j][i] = (m.n[e][j][i] > 0.) ? std::sqrt(m.n[e][j][i]) : 1.0;
 }
 
-// ── MC: árbol CoincTree, mismo corte de selección que mc_analysis() ───────
-static bool fillCountsMC(TTree* t, McCounts& counts,
+// etiqueta corta para nombres de ficheros/histogramas: 0.05 -> "thr050"
+static std::string thrTag(double thr)
+{
+    return std::string(Form("thr%03d", (int)std::lround(thr * 1000.)));
+}
+
+// ── MC: árbol CoincTree, mismo corte de selección que mc_analysis(), pero
+//    el umbral de amplitud se barre. Se hace UNA sola pasada por el árbol y
+//    cada evento se acumula en todos los umbrales que pasa (los conjuntos
+//    son anidados: amp_min >= thr) ──────────────────────────────────────────
+static bool fillCountsMC(TTree* t, std::vector<McCounts>& counts,
+                          const std::vector<double>& thresholds,
                           const std::vector<double>& energy_bins_eff, int nbins_eff)
 {
     Double_t neutronE, cos_theta_det, cos_theta;
@@ -71,7 +83,9 @@ static bool fillCountsMC(TTree* t, McCounts& counts,
     t->SetBranchAddress("amp0_c2", &amp0_c2);
     t->SetBranchAddress("amp1_c2", &amp1_c2);
 
-    Long64_t nsel = 0;
+    const size_t nthr = thresholds.size();
+    std::vector<Long64_t> nsel(nthr, 0);
+
     for (Long64_t k = 0, n = t->GetEntries(); k < n; ++k) {
         t->GetEntry(k);
 
@@ -80,8 +94,7 @@ static bool fillCountsMC(TTree* t, McCounts& counts,
         if (Z0 <= 2 || Z1 <= 2)           continue;
         if (Z0 + Z1 < 80 || Z0 + Z1 > 92) continue;
         if (A0 + A1 < 200)                continue;
-        if (ppac0!=8 || amp0_c1<0.05 || amp1_c1<0.05 || amp0_c2<0.05 || amp1_c2<0.05) continue;
-        ++nsel;
+        if (ppac0 != 8)                   continue;
 
         int d = cosBin(cos_theta_det, nbins_det);
         if (d < 0) continue;
@@ -95,10 +108,24 @@ static bool fillCountsMC(TTree* t, McCounts& counts,
         int j = cosBin(cos_theta, nbins_beam);
         if (j < 0) continue;
 
-        counts.n[e_eff][j][d] += 1.;
+        // el corte original era amp*_c* >= 0.05 en las cuatro amplitudes:
+        // equivale a exigir min(amp) >= umbral
+        double amp_min = std::min({amp0_c1, amp1_c1, amp0_c2, amp1_c2});
+
+        for (size_t s = 0; s < nthr; ++s) {
+            if (amp_min < thresholds[s]) continue;
+            counts[s].n[e_eff][j][d] += 1.;
+            ++nsel[s];
+        }
     }
-    std::cout << "  seleccionados (MC): " << nsel << "\n";
-    return nsel > 0;
+
+    Long64_t tot = 0;
+    for (size_t s = 0; s < nthr; ++s) {
+        std::cout << "  seleccionados (MC, amp > " << thresholds[s] << "): "
+                  << nsel[s] << "\n";
+        tot += nsel[s];
+    }
+    return tot > 0;
 }
 
 // ── DATOS: árboles events_uranium / events_gold, ramas y cortes reales de
@@ -110,7 +137,7 @@ static bool fillCountsData(TTree* t, McCounts& counts, Sample sample,
 {
     Double_t cos_theta_det, cos_theta;
     Double_t tof1, tof0, neutron_energy;
-    Float_t  amp0, amp1;
+    Double_t  amp0, amp1;
     Double_t x0, x1;
 
     t->SetBranchAddress("tof1",           &tof1);
@@ -127,7 +154,6 @@ static bool fillCountsData(TTree* t, McCounts& counts, Sample sample,
     for (Long64_t k = 0, n = t->GetEntries(); k < n; ++k) {
         t->GetEntry(k);
 
-        if (x1 > 5 || x0 < -5.5)                       continue;
         if (neutron_energy > 1000)                      continue;
         if (cos_theta_det < 0.0)                        continue;
         if (std::fabs(cos_theta_det) > 1 || std::fabs(cos_theta) > 1) continue;
@@ -156,88 +182,156 @@ static bool fillCountsData(TTree* t, McCounts& counts, Sample sample,
     return nsel > 0;
 }
 
-// ── corre ambos métodos de eficiencia dado un McCounts ya lleno ───────────
-static bool computeBoth(McCounts& counts, const Vec2D& acceptance, int nbins_eff,
-                         std::vector<EfficiencyResult>& eff_overlap,
-                         std::vector<EfficiencyResult>& eff_nooverlap)
+// ── eficiencia (método con overlap) para un McCounts ya lleno ─────────────
+static void computeOverlapEff(McCounts& counts, const Vec2D& acceptance, int nbins_eff,
+                               std::vector<EfficiencyResult>& eff)
 {
     poissonErrors(counts);
-    eff_overlap.resize(nbins_eff);
-    eff_nooverlap.resize(nbins_eff);
-    for (int e = 0; e < nbins_eff; ++e) {
-        eff_overlap[e]   = computeEfficiency(nbins_det - 1, nbins_beam, nbins_det,
-                                              counts.n, counts.u_n, acceptance, e);
-        eff_nooverlap[e] = computeEfficiencyNoOverlap(nbins_det - 1, nbins_beam, nbins_det,
-                                              counts.n, counts.u_n, acceptance, e);
-    }
-    return true;
+    eff.resize(nbins_eff);
+    for (int e = 0; e < nbins_eff; ++e)
+        eff[e] = computeEfficiency(nbins_det - 1, nbins_beam, nbins_det,
+                                    counts.n, counts.u_n, acceptance, e);
 }
 
-// ── grafica overlap vs no-overlap y la diferencia relativa, para un dataset
-static void plotComparison(const std::vector<EfficiencyResult>& eff_overlap,
-                            const std::vector<EfficiencyResult>& eff_nooverlap,
-                            int nbins_eff, const std::string& label,
-                            const std::string& outdir)
+// ── grafica datos vs MC para cada umbral, y el cociente MC/datos ──────────
+static void plotMCvsData(const std::vector<std::vector<EfficiencyResult>>& eff_mc,
+                          const std::vector<double>& thresholds,
+                          const std::vector<EfficiencyResult>& eff_data,
+                          int nbins_eff, const std::string& outdir)
 {
+    const int colors[5] = { kRed + 1, kOrange + 7, kGreen + 2, kAzure + 2, kViolet + 1 };
+    const size_t nthr = thresholds.size();
+
     for (int e = 0; e < nbins_eff; ++e) {
-        std::vector<double> x, ex, yO, eyO, yN, eyN, yRat, eyRat;
+
+        // --- datos ---
+        std::vector<double> xD, exD, yD, eyD;
         for (int i = 0; i < nbins_det; ++i) {
-            double eO = eff_overlap[e].eps[i],  ueO = eff_overlap[e].u_eps[i];
-            double eN = eff_nooverlap[e].eps[i], ueN = eff_nooverlap[e].u_eps[i];
-            if (eO <= 0. || eN <= 0.) continue;
-
-            x.push_back((i + 0.5) / nbins_det);
-            ex.push_back(0.5 / nbins_det);
-            yO.push_back(eO); eyO.push_back(ueO);
-            yN.push_back(eN); eyN.push_back(ueN);
-
-            double r = eN / eO;
-            yRat.push_back(r);
-            eyRat.push_back(r * std::sqrt(std::pow(ueO/eO,2) + std::pow(ueN/eN,2)));
+            double v = eff_data[e].eps[i];
+            if (v <= 0.) continue;
+            xD.push_back((i + 0.5) / nbins_det);
+            exD.push_back(0.5 / nbins_det);
+            yD.push_back(v);
+            eyD.push_back(eff_data[e].u_eps[i]);
         }
-        if (x.empty()) continue;
+        if (xD.empty()) continue;
 
-        TGraphErrors* gO = new TGraphErrors(x.size(), x.data(), yO.data(), ex.data(), eyO.data());
-        TGraphErrors* gN = new TGraphErrors(x.size(), x.data(), yN.data(), ex.data(), eyN.data());
-        gO->SetName(Form("eff_overlap_%s_ebin%d", label.c_str(), e));
-        gN->SetName(Form("eff_nooverlap_%s_ebin%d", label.c_str(), e));
-        gO->SetMarkerStyle(20); gO->SetMarkerColor(kBlue+1);  gO->SetLineColor(kBlue+1);
-        gN->SetMarkerStyle(24); gN->SetMarkerColor(kRed+1);   gN->SetLineColor(kRed+1);
-
-        // rango Y conjunto -- si no, al dibujar gO primero con "AP" el eje se
-        // autoescala solo a gO y gN puede quedar cortado al superponerla
         double ymin = 1e300, ymax = -1e300;
-        for (size_t k = 0; k < yO.size(); ++k) {
-            ymin = std::min({ymin, yO[k]-eyO[k], yN[k]-eyN[k]});
-            ymax = std::max({ymax, yO[k]+eyO[k], yN[k]+eyN[k]});
+        for (size_t k = 0; k < yD.size(); ++k) {
+            ymin = std::min(ymin, yD[k] - eyD[k]);
+            ymax = std::max(ymax, yD[k] + eyD[k]);
         }
+
+        // --- MC, un grafo por umbral ---
+        std::vector<TGraphErrors*> gMC(nthr, nullptr);
+        for (size_t s = 0; s < nthr; ++s) {
+            if ((int)eff_mc[s].size() < nbins_eff) continue;
+            std::vector<double> x, ex, y, ey;
+            for (int i = 0; i < nbins_det; ++i) {
+                double v = eff_mc[s][e].eps[i];
+                if (v <= 0.) continue;
+                x.push_back((i + 0.5) / nbins_det);
+                ex.push_back(0.5 / nbins_det);
+                y.push_back(v);
+                ey.push_back(eff_mc[s][e].u_eps[i]);
+            }
+            if (x.empty()) continue;
+            for (size_t k = 0; k < y.size(); ++k) {
+                ymin = std::min(ymin, y[k] - ey[k]);
+                ymax = std::max(ymax, y[k] + ey[k]);
+            }
+            gMC[s] = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
+            gMC[s]->SetName(Form("eff_mc_%s_ebin%d", thrTag(thresholds[s]).c_str(), e));
+            gMC[s]->SetMarkerStyle(24);
+            gMC[s]->SetMarkerColor(colors[s % 5]);
+            gMC[s]->SetLineColor(colors[s % 5]);
+        }
+
+        TGraphErrors* gD = new TGraphErrors(xD.size(), xD.data(), yD.data(), exD.data(), eyD.data());
+        gD->SetName(Form("eff_data_ebin%d", e));
+        gD->SetMarkerStyle(20);
+        gD->SetMarkerColor(kBlack);
+        gD->SetLineColor(kBlack);
+        gD->SetLineWidth(2);
+
+        // rango Y conjunto -- si no, al dibujar gD primero con "ALP" el eje se
+        // autoescala solo a los datos y las curvas MC pueden quedar cortadas
         double pad = 0.1 * (ymax - ymin);
-        gO->SetMinimum(ymin - pad);
-        gO->SetMaximum(ymax + pad);
+        gD->SetMinimum(ymin - pad);
+        gD->SetMaximum(ymax + pad);
 
-        TCanvas* cv = new TCanvas(Form("cv_eff_%s_%d", label.c_str(), e), "efficiency comparison", 900, 600);
-        gO->SetTitle(Form("%s efficiency ebin %d;|cos#theta_{det}|;#varepsilon (rel.)", label.c_str(), e));
-        gO->Draw("ALP");
-        gN->Draw("LP same");
-        TLegend* leg = new TLegend(0.6, 0.75, 0.89, 0.89);
-        leg->AddEntry(gO, "con overlap", "lp");
-        leg->AddEntry(gN, "sin overlap", "lp");
+        TCanvas* cv = new TCanvas(Form("cv_eff_ebin%d", e),
+                                   "efficiency MC thresholds vs data", 900, 600);
+        gD->SetTitle(Form("Eficiencia (overlap) ebin %d;|cos#theta_{det}|;#varepsilon (rel.)", e));
+        gD->Draw("ALP");
+        for (size_t s = 0; s < nthr; ++s)
+            if (gMC[s]) gMC[s]->Draw("LP same");
+
+        TLegend* leg = new TLegend(0.60, 0.62, 0.89, 0.89);
+        leg->AddEntry(gD, "datos", "lp");
+        for (size_t s = 0; s < nthr; ++s)
+            if (gMC[s]) leg->AddEntry(gMC[s], Form("MC amp > %.2f", thresholds[s]), "lp");
         leg->Draw();
-        cv->SaveAs((outdir + "eff_compare_" + label + "_ebin" + std::to_string(e) + ".pdf").c_str());
+        cv->SaveAs((outdir + "eff_mc_thresholds_vs_data_ebin" + std::to_string(e) + ".pdf").c_str());
 
-        TGraphErrors* gRat = new TGraphErrors(x.size(), x.data(), yRat.data(), ex.data(), eyRat.data());
-        gRat->SetName(Form("eff_ratio_%s_ebin%d", label.c_str(), e));
-        gRat->SetTitle(Form("%s ratio (sin overlap / con overlap) ebin %d;|cos#theta_{det}|;ratio", label.c_str(), e));
-        gRat->SetMarkerStyle(20);
+        // --- cociente MC / datos ---
+        std::vector<TGraphErrors*> gR(nthr, nullptr);
+        double rmin = 1e300, rmax = -1e300;
+        for (size_t s = 0; s < nthr; ++s) {
+            if ((int)eff_mc[s].size() < nbins_eff) continue;
+            std::vector<double> x, ex, y, ey;
+            for (int i = 0; i < nbins_det; ++i) {
+                double vD = eff_data[e].eps[i],  uD = eff_data[e].u_eps[i];
+                double vM = eff_mc[s][e].eps[i], uM = eff_mc[s][e].u_eps[i];
+                if (vD <= 0. || vM <= 0.) continue;
+                double r = vM / vD;
+                x.push_back((i + 0.5) / nbins_det);
+                ex.push_back(0.5 / nbins_det);
+                y.push_back(r);
+                ey.push_back(r * std::sqrt(std::pow(uM / vM, 2) + std::pow(uD / vD, 2)));
+            }
+            if (x.empty()) continue;
+            for (size_t k = 0; k < y.size(); ++k) {
+                rmin = std::min(rmin, y[k] - ey[k]);
+                rmax = std::max(rmax, y[k] + ey[k]);
+            }
+            gR[s] = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
+            gR[s]->SetName(Form("eff_ratio_mc_%s_over_data_ebin%d", thrTag(thresholds[s]).c_str(), e));
+            gR[s]->SetMarkerStyle(20);
+            gR[s]->SetMarkerColor(colors[s % 5]);
+            gR[s]->SetLineColor(colors[s % 5]);
 
-        TCanvas* cv2 = new TCanvas(Form("cv_ratio_%s_%d", label.c_str(), e), "efficiency ratio", 900, 500);
-        gRat->Draw("AP");
-        cv2->SaveAs((outdir + "eff_ratio_" + label + "_ebin" + std::to_string(e) + ".pdf").c_str());
+            double sum = 0.;
+            for (double v : y) sum += (v - 1.);
+            std::cout << "ebin " << e << ", MC amp > " << thresholds[s]
+                      << ": diferencia media (MC/datos - 1) = "
+                      << sum / y.size() * 100. << " %\n";
+        }
 
-        std::cout << label << " ebin " << e << ": diferencia media (sin/con - 1) = ";
-        double sum = 0.; int n = 0;
-        for (double r : yRat) { sum += (r - 1.); ++n; }
-        std::cout << (n ? sum / n * 100. : 0.) << " %\n";
+        TGraphErrors* gFirst = nullptr;
+        for (size_t s = 0; s < nthr && !gFirst; ++s) gFirst = gR[s];
+        if (!gFirst) continue;
+
+        double rpad = 0.1 * (rmax - rmin);
+        gFirst->SetMinimum(rmin - rpad);
+        gFirst->SetMaximum(rmax + rpad);
+        gFirst->SetTitle(Form("MC/Data ebin %d;|cos#theta_{det}|;MC / Data", e));
+
+        TCanvas* cv2 = new TCanvas(Form("cv_ratio_ebin%d", e), "efficiency ratio", 900, 500);
+        gFirst->Draw("ALP");
+        for (size_t s = 0; s < nthr; ++s)
+            if (gR[s] && gR[s] != gFirst) gR[s]->Draw("LP same");
+
+        TLine* one = new TLine(0., 1., 1., 1.);
+        one->SetLineStyle(2);
+        one->SetLineColor(kGray + 2);
+        one->Draw("same");
+
+        TLegend* leg2 = new TLegend(0.60, 0.68, 0.89, 0.89);
+        for (size_t s = 0; s < nthr; ++s)
+            if (gR[s]) leg2->AddEntry(gR[s], Form("MC amp > %.2f", thresholds[s]), "lp");
+        leg2->Draw();
+        cv2->SaveAs((outdir + "eff_ratio_mc_over_data_ebin" + std::to_string(e) + ".pdf").c_str());
     }
 }
 
@@ -268,14 +362,18 @@ void compare_efficiencies()
     const std::string mc_file   = "/Users/nico/Desktop/Tese/Analysis/montecarlo/data/mc_setup.root";
     const std::string mc_tree   = "CoincTree";
 
-    const std::string data_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root";
+    const std::string data_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_exp.root";
     const std::string data_tree = "events_uranium";   // target 2 = uranio
 
     const std::string acceptance_file =
         "/Users/nico/Desktop/Tese/Analysis/acceptance_coincidence.csv";
 
-    const std::vector<double> energy_bins_eff = {1,10, 100, 600, 1000};
+    const std::vector<double> energy_bins_eff = {1, 10, 100, 600, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
+
+    // umbrales de amplitud aplicados al MC
+    const std::vector<double> thresholds = {0.29, 0.3, 0.31, 0.32, 0.33, 0.34};
+    const size_t nthr = thresholds.size();
 
     Vec2D acceptance, dOmega_fine;
     if (!loadAcceptanceCSV(acceptance_file, dOmega_fine)) {
@@ -284,8 +382,8 @@ void compare_efficiencies()
     }
     acceptance = rebin(dOmega_fine);
 
-    // ── MC ──────────────────────────────────────────────────────────────
-    std::vector<EfficiencyResult> eff_mc_overlap, eff_mc_nooverlap;
+    // ── MC: un juego de eficiencias por umbral ──────────────────────────
+    std::vector<std::vector<EfficiencyResult>> eff_mc(nthr);
     {
         std::cout << "== MC (" << mc_file << ") ==\n";
         TFile* fin = TFile::Open(mc_file.c_str());
@@ -296,18 +394,20 @@ void compare_efficiencies()
             if (!t) {
                 std::cerr << mc_tree << " not found in " << mc_file << " -- se omite MC\n";
             } else {
-                McCounts counts = makeCounts(nbins_eff);
-                fillCountsMC(t, counts, energy_bins_eff, nbins_eff);
-                computeBoth(counts, acceptance, nbins_eff, eff_mc_overlap, eff_mc_nooverlap);
+                std::vector<McCounts> counts;
+                counts.reserve(nthr);
+                for (size_t s = 0; s < nthr; ++s) counts.push_back(makeCounts(nbins_eff));
+
+                fillCountsMC(t, counts, thresholds, energy_bins_eff, nbins_eff);
+                for (size_t s = 0; s < nthr; ++s)
+                    computeOverlapEff(counts[s], acceptance, nbins_eff, eff_mc[s]);
             }
             fin->Close();
         }
     }
-    if (!eff_mc_overlap.empty())
-        plotComparison(eff_mc_overlap, eff_mc_nooverlap, nbins_eff, "mc", outdir);
 
-    // ── Datos ───────────────────────────────────────────────────────────
-    std::vector<EfficiencyResult> eff_data_overlap, eff_data_nooverlap;
+    // ── Datos (un solo juego, cortes de datos sin cambios) ──────────────
+    std::vector<EfficiencyResult> eff_data;
     {
         std::cout << "== DATA (" << data_file << ", " << data_tree << ") ==\n";
         TFile* fin = TFile::Open(data_file.c_str());
@@ -320,21 +420,26 @@ void compare_efficiencies()
             } else {
                 McCounts counts = makeCounts(nbins_eff);
                 fillCountsData(t, counts, Sample::uranium, energy_bins_eff, nbins_eff);
-                computeBoth(counts, acceptance, nbins_eff, eff_data_overlap, eff_data_nooverlap);
+                computeOverlapEff(counts, acceptance, nbins_eff, eff_data);
             }
             fin->Close();
         }
     }
-    if (!eff_data_overlap.empty())
-        plotComparison(eff_data_overlap, eff_data_nooverlap, nbins_eff, "data", outdir);
+
+    // ── comparación MC (por umbral) vs datos ────────────────────────────
+    bool have_mc = false;
+    for (size_t s = 0; s < nthr; ++s) if (!eff_mc[s].empty()) have_mc = true;
+    if (have_mc && !eff_data.empty())
+        plotMCvsData(eff_mc, thresholds, eff_data, nbins_eff, outdir);
+    else
+        std::cerr << "No hay MC y/o datos suficientes para comparar.\n";
 
     // ── guardar todo lo que sí se pudo calcular ────────────────────────────
-    TFile* fout = TFile::Open((outdir + "output_efficiency_overlap_comparison.root").c_str(), "RECREATE");
-    saveEff(eff_mc_overlap,     nbins_eff, "mc_overlap");
-    saveEff(eff_mc_nooverlap,   nbins_eff, "mc_nooverlap");
-    saveEff(eff_data_overlap,   nbins_eff, "data_overlap");
-    saveEff(eff_data_nooverlap, nbins_eff, "data_nooverlap");
+    TFile* fout = TFile::Open((outdir + "output_efficiency_threshold_comparison.root").c_str(), "RECREATE");
+    for (size_t s = 0; s < nthr; ++s)
+        saveEff(eff_mc[s], nbins_eff, "mc_" + thrTag(thresholds[s]));
+    saveEff(eff_data, nbins_eff, "data");
     fout->Close();
 
-    std::cout << "Guardado: " << outdir << "output_efficiency_overlap_comparison.root\n";
+    std::cout << "Guardado: " << outdir << "output_efficiency_threshold_comparison.root\n";
 }

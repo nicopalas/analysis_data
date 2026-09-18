@@ -1,281 +1,154 @@
+// sums_vs_run.cpp — sum distributions per detector vs run number
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/utils.h"
+#include <unordered_set>
 
-// ============================================================
-//  Ajuste gaussiano en ventana FWTM (full width at tenth max)
-//  Devuelve {mean, sigma, mean_err, sigma_err} vía referencias
-// ============================================================
+static const int NDET = 10;
+
 bool FitFWTM(TH1D* h, double& mean, double& sigma, double& mean_err, double& sigma_err)
 {
-    if (!h || h->GetEntries() < 20) return false;
-
-    int nbins_h   = h->GetNbinsX();
-    int maxbin    = h->GetMaximumBin();
-    double peak   = h->GetBinCenter(maxbin);
+    if (!h || h->GetEntries() < 50) return false;
+    int nbins_h = h->GetNbinsX();
+    int maxbin  = h->GetMaximumBin();
+    double peak = h->GetBinCenter(maxbin);
     double maxval = h->GetBinContent(maxbin);
     if (maxval <= 0) return false;
-
     double tenth = maxval / 10.0;
 
-    double left  = h->GetBinCenter(1);
-    for (int b = maxbin; b >= 1; b--) {
-        if (h->GetBinContent(b) > tenth) continue;
-        left = h->GetBinCenter(b);
-        break;
-    }
-
+    double left = h->GetBinCenter(1);
+    for (int b = maxbin; b >= 1; b--) { if (h->GetBinContent(b) > tenth) continue; left = h->GetBinCenter(b); break; }
     double right = h->GetBinCenter(nbins_h);
-    for (int b = maxbin; b <= nbins_h; b++) {
-        if (h->GetBinContent(b) > tenth) continue;
-        right = h->GetBinCenter(b);
-        break;
-    }
-
+    for (int b = maxbin; b <= nbins_h; b++) { if (h->GetBinContent(b) > tenth) continue; right = h->GetBinCenter(b); break; }
     if (right <= left) return false;
 
     TF1 f("fwtm_gaus", "gaus", left, right);
     f.SetParameter(1, peak);
-    TFitResultPtr r = h->Fit(&f, "QRSN", "", left, right);
-    if (!r.Get() || r->Status() != 0) {
-        // seguimos adelante igualmente, pero avisamos
-        std::cout << "[WARN] fit no convergio bien en " << h->GetName() << std::endl;
-    }
-
-    mean      = f.GetParameter(1);
-    sigma     = f.GetParameter(2);
-    mean_err  = f.GetParError(1);
-    sigma_err = f.GetParError(2);
-    return true;
+    h->Fit(&f, "QRSN", "", left, right);
+    mean = f.GetParameter(1);   sigma = f.GetParameter(2);
+    mean_err = f.GetParError(1); sigma_err = f.GetParError(2);
+    return (sigma > 0 && sigma < (right - left));
 }
 
-// ============================================================
-//  Overlay de un conjunto de histogramas (uno por ebin) en un
-//  único canvas, y lo guarda + escribe
-// ============================================================
-void DrawOverlay(std::vector<TH1D*>& hists, int ebins,
-                  std::vector<double>& E_low, std::vector<double>& E_high,
-                  const char* title, const char* fname, TFile* fout)
+// slice a (run, sum) TH2 run by run, fit each slice, return centroid or sigma vs run
+static TGraphErrors* trend(TH2D* h2, const char* name, const char* title, bool want_sigma)
 {
-    const int colors[] = {kBlack, kAzure+2, kRed+1, kSpring-1, kOrange+7,
-                           kViolet-3, kTeal+3, kMagenta+2, kGray+2, kYellow+2};
-    const int markers[] = {20,21,22,23,33,34,24,25,26,27};
-
-    TCanvas* c = new TCanvas(Form("c_%s", fname), title, 1000, 800);
-    TLegend* leg = new TLegend(0.65, 0.55, 0.94, 0.90);
-    leg->SetNColumns(1);
-    leg->SetTextSize(0.025);
-    leg->SetBorderSize(0);
-
-    // normalizar cada histograma a area unitaria (comparar forma, no cuentas absolutas)
-    std::vector<TH1D*> hnorm(ebins, nullptr);
-    for (int i = 0; i < ebins; i++) {
-        if (!hists[i] || hists[i]->GetEntries() == 0) continue;
-        hnorm[i] = (TH1D*) hists[i]->Clone(Form("%s_norm", hists[i]->GetName()));
-        hnorm[i]->SetDirectory(0);
-        double integral = hnorm[i]->Integral();
-        if (integral > 0) hnorm[i]->Scale(1.0 / integral);
+    std::vector<double> x, y, ex, ey;
+    for (int bx = 1; bx <= h2->GetNbinsX(); bx++) {
+        TH1D* slice = h2->ProjectionY(Form("_px_%s_%d", name, bx), bx, bx);
+        slice->SetDirectory(0);
+        double m, s, me, se;
+        if (FitFWTM(slice, m, s, me, se)) {
+            x .push_back(h2->GetXaxis()->GetBinCenter(bx));
+            ex.push_back(0.0);
+            y .push_back(want_sigma ? s  : m);
+            ey.push_back(want_sigma ? se : me);
+        }
+        delete slice;
     }
-
-    double maxY = 0;
-    for (int i = 0; i < ebins; i++)
-        if (hnorm[i]) maxY = std::max(maxY, hnorm[i]->GetMaximum());
-
-    bool first = true;
-    for (int i = 0; i < ebins; i++) {
-        if (!hnorm[i]) continue;
-        hnorm[i]->SetLineColor(colors[i % 10]);
-        hnorm[i]->SetMarkerColor(colors[i % 10]);
-        hnorm[i]->SetMarkerStyle(markers[i % 10]);
-        hnorm[i]->SetMaximum(maxY * 1.2);
-        hnorm[i]->SetTitle(title);
-        hnorm[i]->GetYaxis()->SetTitle("Normalized counts");
-        if (first) { hnorm[i]->Draw("E1"); first = false; }
-        else        hnorm[i]->Draw("E1 same");
-        leg->AddEntry(hnorm[i], Form("%.1f-%.1f MeV", E_low[i], E_high[i]), "lp");
-    }
-    leg->Draw();
-    c->SaveAs(Form("%s.png", fname));
-    fout->cd();
-    c->Write();
-    for (auto* h : hnorm) if (h) h->Write();
+    TGraphErrors* g = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
+    g->SetName(name); g->SetTitle(title);
+    g->SetMarkerStyle(20); g->SetMarkerSize(0.6);
+    return g;
 }
 
-void sums_study(){
+void sums_study(const char* tree_name = "events_uranium",
+                 double sum_lo = 80., double sum_hi = 150., int nsumbins = 140,
+                 bool dedup = true)
+{
+    TFile* fin = TFile::Open("/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_test.root");
+    if (!fin || fin->IsZombie()) { std::cerr << "[ERROR] cannot open input file\n"; return; }
+    TTree* tin = (TTree*) fin->Get(tree_name);
+    if (!tin) { std::cerr << "[ERROR] tree " << tree_name << " not found\n"; fin->Close(); return; }
+    if (!tin->GetBranch("RunNumber")) { std::cerr << "[ERROR] no RunNumber branch\n"; fin->Close(); return; }
 
-    const int    ebins = 2;
-    const int    bins  = 100;
-    const double emin  = 40.;
-    const double emax  = 1000.;
-    const double sum_lo = 80., sum_hi = 120.;   // rango de los sumX/sumY
+    const int run_min = (int) tin->GetMinimum("RunNumber");
+    const int run_max = (int) tin->GetMaximum("RunNumber");
+    const int nruns   = run_max - run_min + 1;
+    std::cout << "[INFO] " << tree_name << ": " << tin->GetEntries()
+              << " entries, runs " << run_min << " to " << run_max << "\n";
 
-    TFile *fin = TFile::Open("/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root");
-    if (!fin || fin->IsZombie()) { std::cerr << "No se pudo abrir coincidences.root\n"; return; }
+    Int_t    RunNumber, coincID, det0, det1;
+    Double_t sumX0, sumY0, sumX1, sumY1, neutron_energy;
+    Float_t  amp0, amp1;   // amp<s> is booked as /D in events_selection — see note below
 
-    TTree *tin_u = (TTree*) fin->Get("events_gold");
-    if (!tin_u) { std::cerr << "No se encontro events_uranium\n"; return; }
+    tin->SetBranchAddress("RunNumber",      &RunNumber);
+    tin->SetBranchAddress("coincID",        &coincID);
+    tin->SetBranchAddress("det0",           &det0);
+    tin->SetBranchAddress("det1",           &det1);
+    tin->SetBranchAddress("sumX0",          &sumX0);
+    tin->SetBranchAddress("sumY0",          &sumY0);
+    tin->SetBranchAddress("sumX1",          &sumX1);
+    tin->SetBranchAddress("sumY1",          &sumY1);
+    tin->SetBranchAddress("neutron_energy", &neutron_energy);
 
-    Long64_t nentries_u = tin_u->GetEntries();
-
-    double sumX0_u, sumX1_u, sumY1_u, sumY0_u;
-    double neutron_energy_u;
-    float  amp0_u, amp1_u;
-
-    tin_u->SetBranchAddress("sumX0", &sumX0_u);
-    tin_u->SetBranchAddress("sumY0", &sumY0_u);
-    tin_u->SetBranchAddress("sumX1", &sumX1_u);
-    tin_u->SetBranchAddress("sumY1", &sumY1_u);
-    tin_u->SetBranchAddress("neutron_energy", &neutron_energy_u);
-    tin_u->SetBranchAddress("amp0", &amp0_u);
-    tin_u->SetBranchAddress("amp1", &amp1_u);
-
-    std::vector<double> neutron_energy_bins = {40, 300, 1000};
-    std::vector<double> E_low(ebins), E_high(ebins);
-    for (int e = 0; e < ebins; ++e) {
-        E_low[e]  = neutron_energy_bins[e];
-        E_high[e] = neutron_energy_bins[e+1];
+    std::vector<TH2D*> h2X(NDET, nullptr), h2Y(NDET, nullptr);
+    for (int d = 0; d < NDET; d++) {
+        h2X[d] = new TH2D(Form("h2_sumX_det%d", d), Form("det %d;run number;sumX [ns]", d),
+                          nruns, run_min - 0.5, run_max + 0.5, nsumbins, sum_lo, sum_hi);
+        h2Y[d] = new TH2D(Form("h2_sumY_det%d", d), Form("det %d;run number;sumY [ns]", d),
+                          nruns, run_min - 0.5, run_max + 0.5, nsumbins, sum_lo, sum_hi);
+        h2X[d]->SetDirectory(0); h2Y[d]->SetDirectory(0);
     }
 
-    std::vector<TH1D*> hists_sumx0(ebins, nullptr), hists_sumx1(ebins, nullptr);
-    std::vector<TH1D*> hists_sumy0(ebins, nullptr), hists_sumy1(ebins, nullptr);
-    std::vector<TH1D*> hists_sumx0_b(ebins, nullptr), hists_sumx1_b(ebins, nullptr);
-    std::vector<TH1D*> hists_sumy0_b(ebins, nullptr), hists_sumy1_b(ebins, nullptr);
+    // the same anode hit appears in the pairs (d-1,d) and (d,d+1); count it once
+    std::unordered_set<unsigned long long> seen;
+    auto key = [](int run, int cid, int det) {
+        return ((unsigned long long)(unsigned)run << 36) ^
+               ((unsigned long long)(unsigned)cid << 4)  ^ (unsigned long long)det;
+    };
 
-    for (int i = 0; i < ebins; i++){
-        hists_sumx0[i]   = new TH1D(Form("hists_x0_ebin%d",   i), "", bins, sum_lo, sum_hi);
-        hists_sumx1[i]   = new TH1D(Form("hists_x1_ebin%d",   i), "", bins, sum_lo, sum_hi);
-        hists_sumy0[i]   = new TH1D(Form("hists_y0_ebin%d",   i), "", bins, sum_lo, sum_hi);
-        hists_sumy1[i]   = new TH1D(Form("hists_y1_ebin%d",   i), "", bins, sum_lo, sum_hi);
-        hists_sumx0_b[i] = new TH1D(Form("hists_x0_b_ebin%d", i), "", bins, sum_lo, sum_hi);
-        hists_sumx1_b[i] = new TH1D(Form("hists_x1_b_ebin%d", i), "", bins, sum_lo, sum_hi);
-        hists_sumy0_b[i] = new TH1D(Form("hists_y0_b_ebin%d", i), "", bins, sum_lo, sum_hi);
-        hists_sumy1_b[i] = new TH1D(Form("hists_y1_b_ebin%d", i), "", bins, sum_lo, sum_hi);
-        for (auto* h : {hists_sumx0[i], hists_sumx1[i], hists_sumy0[i], hists_sumy1[i],
-                        hists_sumx0_b[i], hists_sumx1_b[i], hists_sumy0_b[i], hists_sumy1_b[i]})
-            h->SetDirectory(0);
-    }
+    Long64_t n = tin->GetEntries();
+    for (Long64_t i = 0; i < n; i++) {
+        tin->GetEntry(i);
+        if (i % 200000 == 0) std::cout << "[INFO] " << i << "/" << n << "\r" << std::flush;
 
-    for (Long64_t i = 0; i < nentries_u; i++){
-        tin_u->GetEntry(i);
-        int ebin = findBin(neutron_energy_bins, neutron_energy_u);
-        if (ebin < 0 || ebin >= ebins) continue;
+        const int  det[2]  = {det0, det1};
+        const double sX[2] = {sumX0, sumX1};
+        const double sY[2] = {sumY0, sumY1};
 
-        bool is_signal = (amp0_u + amp1_u > 15e3) && (amp0_u+amp1_u)<35e3 &&
-                          ((amp1_u - amp0_u) / (amp0_u + amp1_u) < 0.2);
-
-        if (is_signal){
-            hists_sumx0[ebin]->Fill(sumX0_u);
-            hists_sumy0[ebin]->Fill(sumY0_u);
-            hists_sumx1[ebin]->Fill(sumX1_u);
-            hists_sumy1[ebin]->Fill(sumY1_u);
-        } else {
-            hists_sumx0_b[ebin]->Fill(sumX0_u);
-            hists_sumy0_b[ebin]->Fill(sumY0_u);
-            hists_sumx1_b[ebin]->Fill(sumX1_u);
-            hists_sumy1_b[ebin]->Fill(sumY1_u);
+        for (int s = 0; s < 2; s++) {
+            int d = det[s];
+            if (d < 0 || d >= NDET) continue;
+            if (sX[s] < -9000. || sY[s] < -9000.) continue;              // DUMMY
+            if (dedup && !seen.insert(key(RunNumber, coincID, d)).second) continue;
+            h2X[d]->Fill(RunNumber, sX[s]);
+            h2Y[d]->Fill(RunNumber, sY[s]);
         }
     }
+    std::cout << "\n";
     fin->Close();
 
-    TFile* fout = new TFile("sums_study_gold.root", "RECREATE");
+    TFile* fout = new TFile(Form("sums_vs_run_%s.root", tree_name), "RECREATE");
+    for (int d = 0; d < NDET; d++) {
+        if (h2X[d]->GetEntries() == 0) continue;
 
-    // ---- overlays por variable, señal y fondo ----
-    DrawOverlay(hists_sumx0,   ebins, E_low, E_high, "sumX0 signal;sumX0;counts",     "sumx0_signal",     fout);
-    DrawOverlay(hists_sumx1,   ebins, E_low, E_high, "sumX1 signal;sumX1;counts",     "sumx1_signal",     fout);
-    DrawOverlay(hists_sumy0,   ebins, E_low, E_high, "sumY0 signal;sumY0;counts",     "sumy0_signal",     fout);
-    DrawOverlay(hists_sumy1,   ebins, E_low, E_high, "sumY1 signal;sumY1;counts",     "sumy1_signal",     fout);
-    DrawOverlay(hists_sumx0_b, ebins, E_low, E_high, "sumX0 background;sumX0;counts", "sumx0_background", fout);
-    DrawOverlay(hists_sumx1_b, ebins, E_low, E_high, "sumX1 background;sumX1;counts", "sumx1_background", fout);
-    DrawOverlay(hists_sumy0_b, ebins, E_low, E_high, "sumY0 background;sumY0;counts", "sumy0_background", fout);
-    DrawOverlay(hists_sumy1_b, ebins, E_low, E_high, "sumY1 background;sumY1;counts", "sumy1_background", fout);
+        h2X[d]->Write(); h2Y[d]->Write();
 
-    // ---- fits FWTM y evolucion centroide/sigma vs energia ----
-    // agrupamos señal y fondo de la MISMA variable para superponerlos
-    struct VarPair { std::vector<TH1D*>* sig; std::vector<TH1D*>* bkg; const char* tag; };
-    std::vector<VarPair> varpairs = {
-        {&hists_sumx0, &hists_sumx0_b, "sumX0"},
-        {&hists_sumx1, &hists_sumx1_b, "sumX1"},
-        {&hists_sumy0, &hists_sumy0_b, "sumY0"},
-        {&hists_sumy1, &hists_sumy1_b, "sumY1"},
-    };
+        TH1D* pX = h2X[d]->ProjectionY(Form("h_sumX_det%d_all", d)); pX->Write();
+        TH1D* pY = h2Y[d]->ProjectionY(Form("h_sumY_det%d_all", d)); pY->Write();
 
-    std::vector<double> Ecenter(ebins);
-    for (int e = 0; e < ebins; e++) Ecenter[e] = std::sqrt(E_low[e] * E_high[e]);
+        TGraphErrors* gpx = trend(h2X[d], Form("g_peakX_vs_run_det%d",  d), Form("det %d;run number;sumX centroid [ns]", d), false);
+        TGraphErrors* gsx = trend(h2X[d], Form("g_sigmaX_vs_run_det%d", d), Form("det %d;run number;sumX sigma [ns]",    d), true);
+        TGraphErrors* gpy = trend(h2Y[d], Form("g_peakY_vs_run_det%d",  d), Form("det %d;run number;sumY centroid [ns]", d), false);
+        TGraphErrors* gsy = trend(h2Y[d], Form("g_sigmaY_vs_run_det%d", d), Form("det %d;run number;sumY sigma [ns]",    d), true);
+        gpx->Write(); gsx->Write(); gpy->Write(); gsy->Write();
 
-    auto fitAll = [&](std::vector<TH1D*>* hists,
-                       std::vector<double>& mean, std::vector<double>& sigma,
-                       std::vector<double>& mean_err, std::vector<double>& sigma_err){
-        for (int e = 0; e < ebins; e++) {
-            double m=0, s=0, me=0, se=0;
-            if (FitFWTM((*hists)[e], m, s, me, se)) {
-                mean[e]=m; sigma[e]=s; mean_err[e]=me; sigma_err[e]=se;
-            }
-        }
-    };
+        TCanvas* c = new TCanvas(Form("c_det%d", d), Form("det %d", d), 1400, 900);
+        c->Divide(2, 2);
+        c->cd(1); h2X[d]->Draw("COLZ");
+        c->cd(2); h2Y[d]->Draw("COLZ");
+        c->cd(3); gpx->SetMarkerColor(kAzure+2); gpx->SetLineColor(kAzure+2); gpx->Draw("AP");
+                    gpx->GetYaxis()->SetRangeUser(100., 110.);
+                  gpy->SetMarkerColor(kRed+1);   gpy->SetLineColor(kRed+1);
+                  gpy->SetMarkerStyle(25);       gpy->Draw("P same");
+        c->cd(4); gsx->SetMarkerColor(kAzure+2); gsx->SetLineColor(kAzure+2); gsx->Draw("AP");
+                  gsy->SetMarkerColor(kRed+1);   gsy->SetLineColor(kRed+1);
+                  gsy->SetMarkerStyle(25);       gsy->Draw("P same");
+        c->SaveAs(Form("sums_vs_run_%s_det%d.png", tree_name, d));
+        c->Write();
 
-    for (auto& vp : varpairs) {
-        std::vector<double> mean_s(ebins,0), sigma_s(ebins,0), mean_err_s(ebins,0), sigma_err_s(ebins,0);
-        std::vector<double> mean_b(ebins,0), sigma_b(ebins,0), mean_err_b(ebins,0), sigma_err_b(ebins,0);
-        std::vector<double> ex(ebins,0);
-
-        fitAll(vp.sig, mean_s, sigma_s, mean_err_s, sigma_err_s);
-        fitAll(vp.bkg, mean_b, sigma_b, mean_err_b, sigma_err_b);
-
-        TGraphErrors* g_mean_s  = new TGraphErrors(ebins, Ecenter.data(), mean_s.data(),  ex.data(), mean_err_s.data());
-        TGraphErrors* g_sigma_s = new TGraphErrors(ebins, Ecenter.data(), sigma_s.data(), ex.data(), sigma_err_s.data());
-        TGraphErrors* g_mean_b  = new TGraphErrors(ebins, Ecenter.data(), mean_b.data(),  ex.data(), mean_err_b.data());
-        TGraphErrors* g_sigma_b = new TGraphErrors(ebins, Ecenter.data(), sigma_b.data(), ex.data(), sigma_err_b.data());
-
-        g_mean_s->SetName(Form("centroid_vs_E_%s_signal", vp.tag));
-        g_sigma_s->SetName(Form("sigma_vs_E_%s_signal", vp.tag));
-        g_mean_b->SetName(Form("centroid_vs_E_%s_background", vp.tag));
-        g_sigma_b->SetName(Form("sigma_vs_E_%s_background", vp.tag));
-
-        // señal: azul, circulo lleno | fondo: rojo, cuadrado hueco
-        g_mean_s->SetMarkerStyle(20);  g_mean_s->SetMarkerColor(kAzure+2);  g_mean_s->SetLineColor(kAzure+2);
-        g_mean_b->SetMarkerStyle(25);  g_mean_b->SetMarkerColor(kRed+1);   g_mean_b->SetLineColor(kRed+1);
-        g_sigma_s->SetMarkerStyle(20); g_sigma_s->SetMarkerColor(kAzure+2); g_sigma_s->SetLineColor(kAzure+2);
-        g_sigma_b->SetMarkerStyle(25); g_sigma_b->SetMarkerColor(kRed+1);  g_sigma_b->SetLineColor(kRed+1);
-
-        // --- canvas centroide: señal + fondo superpuestos ---
-        TCanvas* cm = new TCanvas(Form("c_centroid_%s", vp.tag), vp.tag, 900, 700);
-        cm->SetLogx();
-        double ymin_m = std::min(TMath::MinElement(ebins, mean_s.data()), TMath::MinElement(ebins, mean_b.data()));
-        double ymax_m = std::max(TMath::MaxElement(ebins, mean_s.data()), TMath::MaxElement(ebins, mean_b.data()));
-        double pad_m  = 0.1 * (ymax_m - ymin_m + 1e-9);
-        g_mean_s->SetTitle(Form(";E_{n} (MeV);Centroid (%s)", vp.tag));
-        g_mean_s->GetYaxis()->SetRangeUser(ymin_m - pad_m, ymax_m + pad_m);
-        g_mean_s->Draw("AP");
-        g_mean_b->Draw("P same");
-        TLegend* leg_m = new TLegend(0.65, 0.75, 0.92, 0.90);
-        leg_m->SetBorderSize(0);
-        leg_m->AddEntry(g_mean_s, "signal", "lp");
-        leg_m->AddEntry(g_mean_b, "background", "lp");
-        leg_m->Draw();
-        cm->SaveAs(Form("centroid_vs_E_%s.png", vp.tag));
-
-        // --- canvas sigma: señal + fondo superpuestos ---
-        TCanvas* cs = new TCanvas(Form("c_sigma_%s", vp.tag), vp.tag, 900, 700);
-        cs->SetLogx();
-        double ymin_s = std::min(TMath::MinElement(ebins, sigma_s.data()), TMath::MinElement(ebins, sigma_b.data()));
-        double ymax_s = std::max(TMath::MaxElement(ebins, sigma_s.data()), TMath::MaxElement(ebins, sigma_b.data()));
-        double pad_s  = 0.1 * (ymax_s - ymin_s + 1e-9);
-        g_sigma_s->SetTitle(Form(";E_{n} (MeV);Sigma (%s)", vp.tag));
-        g_sigma_s->GetYaxis()->SetRangeUser(std::max(0.0, ymin_s - pad_s), ymax_s + pad_s);
-        g_sigma_s->Draw("AP");
-        g_sigma_b->Draw("P same");
-        TLegend* leg_s = new TLegend(0.65, 0.75, 0.92, 0.90);
-        leg_s->SetBorderSize(0);
-        leg_s->AddEntry(g_sigma_s, "signal", "lp");
-        leg_s->AddEntry(g_sigma_b, "background", "lp");
-        leg_s->Draw();
-        cs->SaveAs(Form("sigma_vs_E_%s.png", vp.tag));
-
-        fout->cd();
-        g_mean_s->Write();  g_mean_b->Write();
-        g_sigma_s->Write(); g_sigma_b->Write();
-        cm->Write();
-        cs->Write();
+        std::cout << "det " << d << ": " << (Long64_t)h2X[d]->GetEntries()
+                  << " hits, X centroid over " << gpx->GetN() << " runs\n";
     }
-
     fout->Close();
-    std::cout << "sums_study terminado. Output: sums_study_uranium.root" << std::endl;
+    std::cout << "[DONE] sums_vs_run_" << tree_name << ".root\n";
 }

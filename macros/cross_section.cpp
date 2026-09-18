@@ -3,13 +3,15 @@
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/constants.h"
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/acceptance.h"
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/config.h"
+#include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/histograms.h"
+#include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/cuts.h"
 #include "/Users/nico/Desktop/Tese/Analysis/cross_section/include/cross_section.h"
 #include <map>
 #include <utility>
 
 void gold_xs(){
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_test.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*)fin->Get("events_gold");
     TTree *tin_u = (TTree*) fin->Get("events_uranium");
@@ -47,7 +49,7 @@ void gold_xs(){
 
     // ── energy binning ────────────────────────────────────────────────────────
     const int nbins = 20;
-    std::vector<double> energy_bins = buildLogBins(nbins, 40.0, 1000.0);
+    std::vector<double> energy_bins = buildLogBins(nbins, 60.0, 1000.0, 1.0);
     std::vector<double> E_low(nbins), E_high(nbins);
     for (int e = 0; e < nbins; ++e) {
         E_low[e]  = energy_bins[e];
@@ -91,36 +93,79 @@ void gold_xs(){
     }
     delete hist_flux;
 
-    // ── event loop (ahora también por ángulo de haz y de detector) ─────────
+        // ── event loop ─────────────────────────────────────────────────────────
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double amp0, amp1;
+    double x0, x1, y0, y1;
     double cos_theta, cos_theta_det;
+    double phi, phi_det;
+    double sumX0, sumX1, sumY0, sumY1;
+    int RunNumber;
+    float PSpulse;
     tin->SetBranchAddress("tof1",           &tof1);
     tin->SetBranchAddress("tof0",           &tof0);
     tin->SetBranchAddress("amp0",           &amp0);
     tin->SetBranchAddress("amp1",           &amp1);
+    tin->SetBranchAddress("x0",             &x0);
+    tin->SetBranchAddress("x1",             &x1);
+    tin->SetBranchAddress("y0",             &y0);
+    tin->SetBranchAddress("y1",             &y1);
+    tin->SetBranchAddress("sumX0", &sumX0);
+    tin->SetBranchAddress("sumX1", &sumX1);
+    tin->SetBranchAddress("sumY1", &sumY1);
+    tin->SetBranchAddress("sumY0", &sumY0);
     tin->SetBranchAddress("neutron_energy", &neutron_energy);
     tin->SetBranchAddress("cos_theta",      &cos_theta);
     tin->SetBranchAddress("cos_theta_det",  &cos_theta_det);
+    tin->SetBranchAddress("phi",            &phi);
+    tin->SetBranchAddress("phi_det",        &phi_det);
+    tin->SetBranchAddress("RunNumber",      &RunNumber);
+    tin->SetBranchAddress("PulseIntensity", &PSpulse);
 
     Vec3D counts(nbins, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Long64_t nentries = tin->GetEntries();
 
-    for (Long64_t i = 0; i < nentries; i++){
+    // ── beam-spot offsets (same pre-pass as fillHistograms) ────────────────
+    double mean_x0 = 0.0, mean_x1 = 0.0, mean_y0 = 0.0, mean_y1 = 0.0;
+    Long64_t n_mean = 0;
+    for (Long64_t i = 0; i < nentries; ++i) {
         tin->GetEntry(i);
-        if (neutron_energy < 40.0 || neutron_energy > 1000.0) continue;
-        if (std::fabs(cos_theta) > 1 || std::fabs(cos_theta_det) > 1) continue;
+        if (RunNumber == 118771 || RunNumber == 118789) continue;
+        mean_x0 += x0; mean_x1 += x1;
+        mean_y0 += y0; mean_y1 += y1;
+        ++n_mean;
+    }
+    if (n_mean > 0) { mean_x0 /= n_mean; mean_x1 /= n_mean; mean_y0 /= n_mean; mean_y1 /= n_mean; }
+
+    for (Long64_t i = 0; i < nentries; i++) {
+        tin->GetEntry(i);
+        if (RunNumber == 118771 || RunNumber == 118789 || RunNumber == 118668 ||
+            RunNumber == 118587 || RunNumber == 118751) continue;
+        if (neutron_energy < 60.0 || neutron_energy > 1000.0) continue;
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
 
+        EventCuts c = getCuts(cfg.sample, neutron_energy);
+        if (!passAmplitudeCut(amp0, amp1, c)) continue;
+        if(cfg.sample == Sample::gold){
+        if(sumX1-sumY1>2 || sumX0-sumY0<5) continue;
+        }
+        else{
+            if (sumX0-sumY0<1 || sumX1-sumY1>2) continue;
+        }
+
+
+        if (cos_theta_det < 0.0) continue;
+        if (std::fabs(cos_theta) > 1 || std::fabs(cos_theta_det) > 1) continue;
+
         int bin_beam = int(std::fabs(cos_theta) / dcos_beam);
-        int bin_det  = int(std::fabs(cos_theta_det) / dcos_det);
+        int bin_det  = int(cos_theta_det / dcos_det);
         if (bin_beam < 0 || bin_beam >= nbins_beam) continue;
         if (bin_det  < 0 || bin_det  >= nbins_det)  continue;
 
         double dt = tof1 - tof0;
-        if (cut0->IsInside(amp0+amp1, dt) && cut1->IsInside((amp1-amp0)/(amp0+amp1), dt))
+        if (dt >= c.roi_min && dt <= c.roi_max)
             counts[bin][bin_beam][bin_det]++;
     }
     fin->Close();
@@ -233,7 +278,7 @@ void gold_xs(){
     for (int e = 0; e < nbins; ++e) {
         double Ec      = h_cs_raw->GetBinCenter(e+1);
         double exp_val = h_cs_raw->GetBinContent(e+1);
-        if (Ec<73.9) continue;
+        if (Ec<173.1) continue;
         double ref_val = gr_ref->Eval(Ec);
         if (ref_val <= 0.0) continue;
         scale = ref_val / exp_val;
@@ -299,7 +344,7 @@ void gold_xs(){
 
 void uranium_xs(){
     TFile *fin = TFile::Open(
-        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/coincidences.root", "READ");
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/data/events_selection_test.root", "READ");
     if (!fin || fin->IsZombie()) { std::cerr << "Cannot open data file\n"; return; }
     TTree *tin = (TTree*) fin->Get("events_uranium");
     if (!tin) { std::cerr << "Tree not found\n"; return; }
@@ -336,7 +381,7 @@ void uranium_xs(){
 
     // ── energy binning ────────────────────────────────────────────────────────
     const int nbins = 20;
-    std::vector<double> energy_bins = buildLogBins(nbins, 40.0, 1000.0);
+    std::vector<double> energy_bins = buildLogBins(nbins, 60.0, 1000.0, 1.0);
     std::vector<double> E_low(nbins), E_high(nbins);
     for (int e = 0; e < nbins; ++e) {
         E_low[e]  = energy_bins[e];
@@ -350,8 +395,8 @@ void uranium_xs(){
     // logarítmicos entre 1 y 1000 MeV, fichero "efficiencies_u_toy.root".
     // Si tienes una makeUraniumConfig() real, dímelo y cambio esto por
     // cfg.energy_bins_eff / cfg.efficiency_file como en gold_xs().
-    const int nbins_eff_u = 5;
-    std::vector<double> energy_bins_eff_u = {1, 10, 100, 300, 600, 1000};
+    const int nbins_eff_u = 4;
+    std::vector<double> energy_bins_eff_u = {1, 10, 100, 500, 1000};
     std::string eff_path_u = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/U-238/output_efficiency_uranium.root";
     TFile *eff_file = TFile::Open(eff_path_u.c_str(), "READ");
     if (!eff_file || eff_file->IsZombie()) { std::cerr << "Cannot open efficiency file: " << eff_path_u << "\n"; return; }
@@ -379,36 +424,75 @@ void uranium_xs(){
     }
     delete hist_flux;
 
-    // ── event loop (ahora también por ángulo de haz y de detector) ─────────
+        // ── event loop ─────────────────────────────────────────────────────────
     double tof1, tof0, neutron_energy;
-    float  amp0, amp1;
+    double amp0, amp1;
+    double x0, x1, y0, y1;
     double cos_theta, cos_theta_det;
+    double sumX0, sumX1, sumY0, sumY1;
+    double phi, phi_det;
+    int RunNumber;
+    float PSpulse;
     tin->SetBranchAddress("tof1",           &tof1);
     tin->SetBranchAddress("tof0",           &tof0);
     tin->SetBranchAddress("amp0",           &amp0);
     tin->SetBranchAddress("amp1",           &amp1);
+    tin->SetBranchAddress("x0",             &x0);
+    tin->SetBranchAddress("x1",             &x1);
+    tin->SetBranchAddress("y0",             &y0);
+    tin->SetBranchAddress("y1",             &y1);
+    tin->SetBranchAddress("sumX0", &sumX0);
+    tin->SetBranchAddress("sumX1", &sumX1);
+    tin->SetBranchAddress("sumY1", &sumY1);
+    tin->SetBranchAddress("sumY0", &sumY0);
     tin->SetBranchAddress("neutron_energy", &neutron_energy);
     tin->SetBranchAddress("cos_theta",      &cos_theta);
     tin->SetBranchAddress("cos_theta_det",  &cos_theta_det);
+    tin->SetBranchAddress("phi",            &phi);
+    tin->SetBranchAddress("phi_det",        &phi_det);
+    tin->SetBranchAddress("RunNumber",      &RunNumber);
+    tin->SetBranchAddress("PulseIntensity", &PSpulse);
 
     Vec3D counts(nbins, Vec2D(nbins_beam, std::vector<double>(nbins_det, 0.0)));
     Long64_t nentries = tin->GetEntries();
 
-    for (Long64_t i = 0; i < nentries; i++){
+    // ── beam-spot offsets (same pre-pass as fillHistograms) ────────────────
+    double mean_x0 = 0.0, mean_x1 = 0.0, mean_y0 = 0.0, mean_y1 = 0.0;
+    Long64_t n_mean = 0;
+    for (Long64_t i = 0; i < nentries; ++i) {
         tin->GetEntry(i);
-        if (neutron_energy < 40.0 || neutron_energy > 1000.0) continue;
-        if (std::fabs(cos_theta) > 1 || std::fabs(cos_theta_det) > 1) continue;
+        if (RunNumber == 118771 || RunNumber == 118789) continue;
+        mean_x0 += x0; mean_x1 += x1;
+        mean_y0 += y0; mean_y1 += y1;
+        ++n_mean;
+    }
+    if (n_mean > 0) { mean_x0 /= n_mean; mean_x1 /= n_mean; mean_y0 /= n_mean; mean_y1 /= n_mean; }
+
+    for (Long64_t i = 0; i < nentries; i++) {
+        tin->GetEntry(i);
+        if (RunNumber == 118771 || RunNumber == 118789 || RunNumber == 118668 ||
+            RunNumber == 118587 || RunNumber == 118751) continue;
+        if (neutron_energy < 60.0 || neutron_energy > 1000.0) continue;
 
         int bin = findBin(energy_bins, neutron_energy);
         if (bin < 0 || bin >= nbins) continue;
 
+        EventCuts c = getCuts(Sample::uranium, neutron_energy);
+        if (!passAmplitudeCut(amp0, amp1, c)) continue;
+
+            if (sumX0-sumY0<1 || sumX1-sumY1>2) continue;
+
+
+        if (cos_theta_det < 0.0) continue;
+        if (std::fabs(cos_theta) > 1 || std::fabs(cos_theta_det) > 1) continue;
+
         int bin_beam = int(std::fabs(cos_theta) / dcos_beam);
-        int bin_det  = int(std::fabs(cos_theta_det) / dcos_det);
+        int bin_det  = int(cos_theta_det / dcos_det);
         if (bin_beam < 0 || bin_beam >= nbins_beam) continue;
         if (bin_det  < 0 || bin_det  >= nbins_det)  continue;
 
         double dt = tof1 - tof0;
-        if (cut0->IsInside(amp0+amp1, dt) && cut1->IsInside((amp1-amp0)/(amp0+amp1), dt))
+        if (dt >= c.roi_min && dt <= c.roi_max)
             counts[bin][bin_beam][bin_det]++;
     }
     fin->Close();

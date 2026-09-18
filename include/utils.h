@@ -39,12 +39,12 @@ static double computeStd(const std::vector<double>& v){
     return std::sqrt(var);
 }
 
-static std::vector<double> buildLogBins(int nbins, double e_min, double e_max){
+static std::vector<double> buildLogBins(int nbins, double e_min, double e_max, double exp){
     std::vector<double> bins;
     double log_min = std::log10(e_min);
     double log_max = std::log10(e_max);
     for(int i = 0; i <= nbins; ++i){
-        double log_e = log_min + (log_max - log_min) * std::pow(i / double(nbins), 1.5);
+        double log_e = log_min + (log_max - log_min) * std::pow(i / double(nbins), exp);
         bins.push_back(std::pow(10.0, log_e));
     }
     return bins;

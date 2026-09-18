@@ -52,17 +52,17 @@ static void poissonErrors(McCounts& m)
 void mc_analysis()
 {
     const std::string infile =
-        "/Users/nico/Desktop/Tese/Analysis/montecarlo/data/mc_setup.root";
+        "/Users/nico/Desktop/Tese/Analysis/montecarlo/data/mc_complete.root";
     const std::string outdir =
         "/Users/nico/Desktop/Tese/Analysis/montecarlo/output/";
     const std::string acceptance_file =
-        "/Users/nico/Desktop/Tese/Analysis/acceptance_coincidence.csv";
+        "/Users/nico/Desktop/Tese/Analysis/cross_section/acceptance_coincidence.csv";
 
-    const std::vector<double> energy_bins_eff = {10,1000};
+    const std::vector<double> energy_bins_eff = {10,880};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
-    const int nbins_aniso = 1;
-    std::vector<double> energy_bins_aniso = {10,880 };
+    const int nbins_aniso = 9;
+    std::vector<double> energy_bins_aniso = {40, 100, 200, 300, 400, 500, 600, 700, 800, 900 };
 
     // ── acceptance (same setup as data) ────────────────────────────────────
     Vec2D acceptance, dOmega_fine;
@@ -124,12 +124,9 @@ void mc_analysis()
     for (Long64_t k = 0, n = t->GetEntries(); k < n; ++k) {
         t->GetEntry(k);
 
-        if (target_i != 2)                continue;   // TARGET_U
-        if (!hasTrue_i || !hasTrue_j)     continue;
-        if (Z0 <= 2 || Z1 <= 2)           continue;
-        if (Z0 + Z1 < 80 || Z0 + Z1 > 92) continue;
-        if (A0 + A1 < 200)                continue;
-        if (ppac0!=8 || amp0_c1<0.05 || amp1_c1<0.05 || amp0_c2<0.05 || amp1_c2<0.05) continue;
+        if (target_i != 1)                continue;   // TARGET_U
+        if (coinc_type!=1) continue;
+        if (ppac0!=7 || amp0_c1<0.05 || amp1_c1<0.05 || amp0_c2<0.05 || amp1_c2<0.05) continue;
         ++nsel;
 
         if (angle_axis_lab >= 0.) h_ang_lab->Fill(angle_axis_lab);

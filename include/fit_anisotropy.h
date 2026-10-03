@@ -45,7 +45,7 @@ static LegendreResult legendre_fit(
     std::vector<double>& eps,
     std::vector<double>& u_eps,   
     const AnalysisConfig& cfg,
-    bool fit_a4 = false)
+    bool fit_a4 = true)
 {
     LegendreResult result{};
 

@@ -6,6 +6,7 @@
 #include "TFitResult.h"
 #include "TRandom3.h"
 #include "TMath.h"
+#include "TError.h"
 #include <vector>
 #include <string>
 #include <cmath>
@@ -16,12 +17,17 @@
 // ---------------------------------------------------------------------------
 //  Model
 //
-//    f(x) = flat  +  N_sig * w * Gauss(x; mu_s, sigma_s)
-//                 +  N_U   * w * CrystalBall(x; alpha, n, sigma_U, mu_U)   [gold only]
+//    gold    : f(x) = flat + N_sig * w * Gauss(x; mu_s, sigma_s)
+//                          + N_U   * w * CrystalBall(x; alpha, n, sigma_U, mu_U)
+//              binned Poisson likelihood fit over the full range.
+//
+//    uranium : f(x) = flat
+//              No signal shape and no fit. The flat level is the mean of the
+//              bins lying entirely at tof < roi_min; the signal is the counted
+//              excess in the ROI above that level.
 //
 //  The pdfs are unit-normalised in x, so multiplying by the bin width w makes
 //  f(x) a counts-per-bin prediction and the yields N_sig, N_U literal counts.
-//  (The old code did not do this: f->Integral() was only a count if w == 1.)
 //
 //  Fixed parameter layout for every sample, so index bugs cannot creep in.
 // ---------------------------------------------------------------------------
@@ -58,16 +64,16 @@ static std::string getModelFormula(Sample sample, double w)
 
     switch (sample) {
         case Sample::uranium:
-            // no uranium peak in the spectrum: keep the parameters present but
-            // frozen at zero yield so the layout stays identical
-            return "[0] + " + sig + " + 0.0*([4]+[5]+[6]+[7]+[8])";
+            // flat only. The other parameters are kept (multiplied by zero)
+            // so the parameter layout is identical for every sample.
+            return "[0] + 0.0*([1]+[2]+[3]+[4]+[5]+[6]+[7]+[8])";
         case Sample::gold:
             return "[0] + " + sig + " + " + cb;
     }
     return "[0] + " + sig;
 }
 
-// robust seed for the flat level: median of the bins that belong to neither peak
+// median of the bins that belong to neither peak (gold seed)
 static double seedFlatLevel(TH1D* h, double roi_min, double roi_max)
 {
     std::vector<double> side;
@@ -99,16 +105,53 @@ static double seedYield(TH1D* h, double lo, double hi, double flat)
 }
 
 // ---------------------------------------------------------------------------
+//  Uranium counting: left sideband and ROI.
+//    left sideband : bins lying entirely at tof < roi_min (a bin straddling
+//                    roi_min is excluded so no signal leaks into the flat)
+//    ROI           : bins whose centre lies in [roi_min, roi_max]
+//  flat = mean of the left-sideband bins, the ML estimate for a constant
+//  Poisson level. flat < 0 flags an empty sideband.
+// ---------------------------------------------------------------------------
+struct UraniumCount {
+    double flat    = -1.0;
+    int    n_left  = 0;
+    double obs_roi = 0.0;
+    int    n_roi   = 0;
+};
+
+static bool inLeftSideband(TH1D* h, int b, double roi_min)
+{
+    return h->GetXaxis()->GetBinUpEdge(b) <= roi_min;
+}
+
+static bool inRoi(TH1D* h, int b, double roi_min, double roi_max)
+{
+    const double x = h->GetBinCenter(b);
+    return x >= roi_min && x <= roi_max;
+}
+
+static UraniumCount countUranium(TH1D* h, double roi_min, double roi_max)
+{
+    UraniumCount u;
+    double s = 0.0;
+    for (int b = 1; b <= h->GetNbinsX(); ++b) {
+        const double c = h->GetBinContent(b);
+        if (inLeftSideband(h, b, roi_min))        { s += c; ++u.n_left; }
+        if (inRoi(h, b, roi_min, roi_max))        { u.obs_roi += c; ++u.n_roi; }
+    }
+    if (u.n_left > 0) u.flat = s / u.n_left;
+    return u;
+}
+
+// ---------------------------------------------------------------------------
 static void setModelParameters(TF1* f, Sample sample, TH1D* h,
                                double roi_min, double roi_max,
                                bool fix_cb_tails = true)
 {
-    const double w    = h->GetBinWidth(1);
-    const double flat = seedFlatLevel(h, roi_min, roi_max);
+    const double w = h->GetBinWidth(1);
 
     const double mu_s_seed  = 0.5 * (roi_min + roi_max);
     const double sig_s_seed = std::max(w, (roi_max - roi_min) / 6.0);
-    const double n_s_seed   = seedYield(h, roi_min, roi_max, flat);
 
     f->SetParName(P_FLAT,   "flat");
     f->SetParName(P_NSIG,   "N_sig");
@@ -120,11 +163,28 @@ static void setModelParameters(TF1* f, Sample sample, TH1D* h,
     f->SetParName(P_ALPHA,  "alpha");
     f->SetParName(P_NCB,    "n");
 
-    // --- continuum ---------------------------------------------------------
+    // --- uranium: flat only, everything fixed, no fit ----------------------
+    if (sample == Sample::uranium) {
+        const UraniumCount u = countUranium(h, roi_min, roi_max);
+        f->FixParameter(P_FLAT,   std::max(0.0, u.flat));
+        f->FixParameter(P_NSIG,   0.0);
+        f->FixParameter(P_MUSIG,  mu_s_seed);
+        f->FixParameter(P_SIGSIG, sig_s_seed);
+        f->FixParameter(P_NU,     0.0);
+        f->FixParameter(P_MUU,    kMuU_seed);
+        f->FixParameter(P_SIGU,   kSigU_seed);
+        f->FixParameter(P_ALPHA,  kAlphaU_fix);
+        f->FixParameter(P_NCB,    kNCB_fix);
+        return;
+    }
+
+    // --- gold --------------------------------------------------------------
+    const double flat     = seedFlatLevel(h, roi_min, roi_max);
+    const double n_s_seed = seedYield(h, roi_min, roi_max, flat);
+
     f->SetParameter(P_FLAT, flat);
     f->SetParLimits(P_FLAT, 0.0, 1e6);
 
-    // --- signal ------------------------------------------------------------
     // N_sig is allowed to go negative: a hard lower bound at zero biases the
     // estimator and makes the uncertainty meaningless when the signal is small.
     f->SetParameter(P_NSIG, n_s_seed);
@@ -136,46 +196,37 @@ static void setModelParameters(TF1* f, Sample sample, TH1D* h,
     f->SetParameter(P_SIGSIG, sig_s_seed);
     f->SetParLimits(P_SIGSIG, 0.5 * w, 0.5 * (roi_max - roi_min));
 
-    // --- uranium peak ------------------------------------------------------
-    if (sample == Sample::gold) {
-        const double n_u_seed = seedYield(h,
-                                          kMuU_seed - 3.0 * kSigU_seed,
-                                          kMuU_seed + 3.0 * kSigU_seed,
-                                          flat);
-        f->SetParameter(P_NU, n_u_seed);
-        f->SetParLimits(P_NU, 0.0, 1e7);
+    const double n_u_seed = seedYield(h,
+                                      kMuU_seed - 3.0 * kSigU_seed,
+                                      kMuU_seed + 3.0 * kSigU_seed,
+                                      flat);
+    f->SetParameter(P_NU, n_u_seed);
+    f->SetParLimits(P_NU, 0.0, 1e7);
 
-        f->SetParameter(P_MUU, kMuU_seed);
-        f->SetParLimits(P_MUU, -9.0, -5.0);
+    f->SetParameter(P_MUU, kMuU_seed);
+    f->SetParLimits(P_MUU, -9.0, -5.0);
 
-        f->SetParameter(P_SIGU, kSigU_seed);
-        f->SetParLimits(P_SIGU, 0.5, 2.5);
+    f->SetParameter(P_SIGU, kSigU_seed);
+    f->SetParLimits(P_SIGU, 0.5, 2.5);
 
-        // alpha and n are almost unconstrained by the data and are strongly
-        // anticorrelated with each other and with the flat level. Fix them to
-        // simulation values and vary them afterwards as a systematic.
-        f->SetParameter(P_ALPHA, kAlphaU_fix);
-        f->SetParameter(P_NCB,   kNCB_fix);
-        if (fix_cb_tails) {
-            f->FixParameter(P_ALPHA, kAlphaU_fix);
-            f->FixParameter(P_NCB,   kNCB_fix);
-        } else {
-            // never let alpha cross zero: the sign is a discrete flip of the
-            // tail side, not a direction MINUIT can walk along
-            f->SetParLimits(P_ALPHA, 0.2, 5.0);
-            f->SetParLimits(P_NCB,   1.01, 20.0);
-        }
-    } else {
-        f->FixParameter(P_NU,    0.0);
-        f->FixParameter(P_MUU,   kMuU_seed);
-        f->FixParameter(P_SIGU,  kSigU_seed);
+    // alpha and n are almost unconstrained by the data and are strongly
+    // anticorrelated with each other and with the flat level. Fix them to
+    // simulation values and vary them afterwards as a systematic.
+    f->SetParameter(P_ALPHA, kAlphaU_fix);
+    f->SetParameter(P_NCB,   kNCB_fix);
+    if (fix_cb_tails) {
         f->FixParameter(P_ALPHA, kAlphaU_fix);
         f->FixParameter(P_NCB,   kNCB_fix);
+    } else {
+        // never let alpha cross zero: the sign is a discrete flip of the
+        // tail side, not a direction MINUIT can walk along
+        f->SetParLimits(P_ALPHA, 0.2, 5.0);
+        f->SetParLimits(P_NCB,   1.01, 20.0);
     }
 }
 
 // ---------------------------------------------------------------------------
-//  Component integrals inside the ROI, in counts.
+//  Component integrals inside the ROI, in counts (gold).
 //  Clone the full model and switch the other components off, so the parameter
 //  indices are written down in exactly one place.
 // ---------------------------------------------------------------------------
@@ -219,21 +270,135 @@ struct BackgroundFit {
     double u_counts_subtract_upeak = 0.0;
 
     // signal
-    double n_sig_val      = 0.0;   // total yield from the fit
-    double n_sig_err      = 0.0;   // parabolic error
-    double n_sig_err_lo   = 0.0;   // MINOS
+    //   gold    : Gaussian yield from the fit
+    //   uranium : counted excess in the ROI above the left-sideband flat
+    double n_sig_val      = 0.0;
+    double n_sig_err      = 0.0;   // gold: parabolic; uranium: analytic Poisson
+    double n_sig_err_lo   = 0.0;   // gold: MINOS;     uranium: symmetric
     double n_sig_err_hi   = 0.0;
     double n_sig_roi      = 0.0;   // fraction of the yield inside the ROI
     double n_sig_boot     = 0.0;   // bootstrap cross-check of n_sig_err
 
-    double chi2ndf        = 0.0;
+    double chi2ndf        = 0.0;   // uranium: flatness of the left sideband
     int    n_toys_ok      = 0;
     bool   converged      = false;
 
     TF1*  func            = nullptr;
     TH1D* hist_subtracted = nullptr;   // data - (flat + uranium peak)
-    TFitResultPtr fit_result;
+    TFitResultPtr fit_result;          // empty for uranium (no fit)
 };
+
+// ---------------------------------------------------------------------------
+static double bootStd(const std::vector<double>& v)
+{
+    if (v.size() < 2) return 0.0;
+    double mean = 0.0;
+    for (double x : v) mean += x;
+    mean /= v.size();
+    double var = 0.0;
+    for (double x : v) var += (x - mean) * (x - mean);
+    return std::sqrt(var / (v.size() - 1));
+}
+
+// ---------------------------------------------------------------------------
+//  Uranium: flat level from the left sideband, counted excess in the ROI.
+// ---------------------------------------------------------------------------
+static BackgroundFit fitUraniumFlat(
+    const AnalysisConfig& cfg,
+    TH1D* h,
+    double roi_min,
+    double roi_max,
+    int ebin)
+{
+    BackgroundFit result;
+
+    const int    ntot = h->GetNbinsX();
+    const double xmin = h->GetXaxis()->GetXmin();
+    const double xmax = h->GetXaxis()->GetXmax();
+    const double w    = h->GetBinWidth(1);
+
+    TF1* f = new TF1(Form("model_%s_%d", cfg.output_tag.c_str(), ebin),
+                     getModelFormula(cfg.sample, w).c_str(), xmin, xmax);
+    setModelParameters(f, cfg.sample, h, roi_min, roi_max);
+    result.func = f;
+
+    result.hist_subtracted = static_cast<TH1D*>(
+        h->Clone(Form("hsub_%s_%d", cfg.output_tag.c_str(), ebin)));
+
+    const UraniumCount u = countUranium(h, roi_min, roi_max);
+    if (u.n_left == 0) {
+        Warning("fitUraniumFlat",
+                "no bins fully left of roi_min = %g in %s: flat level undefined",
+                roi_min, h->GetName());
+        result.converged = false;
+        return result;
+    }
+    result.converged = true;
+
+    const double flat     = u.flat;
+    const double var_flat = flat / u.n_left;          // Poisson, mean of n bins
+
+    // --- goodness of fit: is the left sideband actually flat? ---------------
+    if (flat > 0.0) {
+        double chi2 = 0.0;
+        for (int b = 1; b <= ntot; ++b) {
+            if (!inLeftSideband(h, b, roi_min)) continue;
+            const double d = h->GetBinContent(b) - flat;
+            chi2 += d * d / flat;
+        }
+        const int ndf = u.n_left - 1;
+        result.chi2ndf = (ndf > 0) ? chi2 / ndf : 0.0;
+    }
+
+    // --- background under the ROI and counted excess ------------------------
+    const double B  = flat * u.n_roi;
+    const double uB = u.n_roi * std::sqrt(var_flat);
+
+    result.counts_subtract_bkg     = B;
+    result.u_counts_subtract_bkg   = uB;
+    result.counts_subtract_upeak   = 0.0;
+    result.u_counts_subtract_upeak = 0.0;
+    result.counts_subtract         = B;
+    result.u_counts_subtract       = uB;
+
+    result.n_sig_val    = u.obs_roi - B;
+    result.n_sig_err    = std::sqrt(u.obs_roi + uB * uB);
+    result.n_sig_err_lo = -result.n_sig_err;
+    result.n_sig_err_hi =  result.n_sig_err;
+    result.n_sig_roi    = 1.0;
+
+    // --- subtracted histogram: data - flat ----------------------------------
+    for (int b = 1; b <= ntot; ++b) {
+        const double obs = h->GetBinContent(b);
+        result.hist_subtracted->SetBinContent(b, obs - flat);
+        result.hist_subtracted->SetBinError(b, std::sqrt(obs + var_flat));
+    }
+
+    // --- bootstrap cross-check of the analytic errors -----------------------
+    std::vector<double> toy_bkg, toy_nsig;
+    toy_bkg.reserve(cfg.n_toys);
+    toy_nsig.reserve(cfg.n_toys);
+
+    TRandom3 rng(42 + ebin);
+    std::unique_ptr<TH1D> h_toy(
+        static_cast<TH1D*>(h->Clone(Form("h_toy_u_%d", ebin))));
+    h_toy->SetDirectory(nullptr);
+
+    for (int t = 0; t < cfg.n_toys; ++t) {
+        for (int b = 1; b <= ntot; ++b)
+            h_toy->SetBinContent(b, rng.Poisson(h->GetBinContent(b)));
+
+        const UraniumCount ut = countUranium(h_toy.get(), roi_min, roi_max);
+        const double bt = ut.flat * ut.n_roi;
+        toy_bkg .push_back(bt);
+        toy_nsig.push_back(ut.obs_roi - bt);
+    }
+
+    result.n_toys_ok  = (int)toy_nsig.size();
+    result.n_sig_boot = bootStd(toy_nsig);
+
+    return result;
+}
 
 // ---------------------------------------------------------------------------
 static BackgroundFit fitBackground(
@@ -243,6 +408,9 @@ static BackgroundFit fitBackground(
     double roi_max,
     int ebin)
 {
+    if (cfg.sample == Sample::uranium)
+        return fitUraniumFlat(cfg, h, roi_min, roi_max, ebin);
+
     BackgroundFit result;
 
     const int    ntot = h->GetNbinsX();
@@ -301,7 +469,7 @@ static BackgroundFit fitBackground(
     //  errors on the subtracted histogram. A large disagreement between
     //  n_sig_err and n_sig_boot means the likelihood is not parabolic.
     // -----------------------------------------------------------------------
-    const int ntoys       = cfg.n_toys;
+    const int ntoys        = cfg.n_toys;
     const int max_attempts = 4 * ntoys;   // hard cap: never spin forever
 
     std::vector<double> toy_sub (ntot, 0.0);
@@ -357,20 +525,10 @@ static BackgroundFit fitBackground(
 
     result.n_toys_ok = (int)toy_nsig.size();
 
-    auto boot_std = [](const std::vector<double>& v) -> double {
-        if (v.size() < 2) return 0.0;
-        double mean = 0.0;
-        for (double x : v) mean += x;
-        mean /= v.size();
-        double var = 0.0;
-        for (double x : v) var += (x - mean) * (x - mean);
-        return std::sqrt(var / (v.size() - 1));
-    };
-
-    result.u_counts_subtract       = boot_std(toy_total);
-    result.u_counts_subtract_bkg   = boot_std(toy_bkg);
-    result.u_counts_subtract_upeak = boot_std(toy_upeak);
-    result.n_sig_boot              = boot_std(toy_nsig);
+    result.u_counts_subtract       = bootStd(toy_total);
+    result.u_counts_subtract_bkg   = bootStd(toy_bkg);
+    result.u_counts_subtract_upeak = bootStd(toy_upeak);
+    result.n_sig_boot              = bootStd(toy_nsig);
 
     // --- background-subtracted histogram ------------------------------------
     result.hist_subtracted = static_cast<TH1D*>(

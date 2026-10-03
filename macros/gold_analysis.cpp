@@ -7,6 +7,7 @@
 #include "../include/histograms.h"
 #include "../include/background_subtraction.h"
 #include "../include/signal_selection.h"
+#include "../include/efficiency_no_overlap.h"
 #include "../include/efficiency.h"
 #include "../include/anisotropy.h"
 #include "../include/plotting.h"
@@ -22,9 +23,9 @@ void gold_analysis()
     // ================================================================
     // EFFICIENCY — coarse binning
     // ================================================================
-    const double emin = 40.;
+    const double emin = 60.;
     const double emax = 1000.;
-    const std::vector<double> energy_bins_eff = {40, 300, 1000};
+    const std::vector<double> energy_bins_eff = {60, 400, 1000};
     const int nbins_eff = (int)energy_bins_eff.size() - 1;
 
     AnalysisConfig cfg_eff = makeGoldConfig(energy_bins_eff, "eff");
@@ -178,8 +179,8 @@ void gold_analysis()
     // ================================================================
     // ANISOTROPY — 5 bins log entre 40 y 300 MeV
     // ================================================================
-    const int nbins_aniso = 9;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 40, 1000, 0.8);
+    const int nbins_aniso = 6;
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 60, 1000, 0.7);
 
     AnalysisConfig cfg_aniso = makeGoldConfig(energy_bins_aniso, "aniso");
 
@@ -268,7 +269,7 @@ void gold_analysis()
 
 
        // --- anisotropy: puntos + ajuste de Legendre ---
-    const bool fit_a4 = false;
+    const bool fit_a4 = true;
 
     std::vector<AnisotropyResult> aniso(nbins_aniso);
     std::vector<LegendreResult>   leg(nbins_aniso);

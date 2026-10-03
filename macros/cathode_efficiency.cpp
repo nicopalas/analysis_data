@@ -51,19 +51,19 @@ namespace CFG {
                         "coincidences_final.root";
     const char* kTree = "events_cerium";          // <-- ojo: en tu macro la variable
                                                 //     se llamaba events_uranium
-    const char* kBase = "neutron_energy>400 && neutron_energy<2000 && amp0>8000 && amp1>8000 && abs(amp1-amp0)/(amp1+amp0)<0.5 && det0<6";
+    const char* kBase = "neutron_energy>400 && neutron_energy<2000 && amp0+amp1>20e3 && amp0>8000 && amp1>10000 && abs(amp1-amp0)/(amp1+amp0)<0.5 && det0<6";
 
     const std::vector<int> kExcluded = {118771, 118789};
 
     const char* kDT   = "tof1-tof0";            // variable de asimetría temporal
     const double kDTmin = -10., kDTmax = 10.;
-    const int    kDTbins = 80;
+    const int    kDTbins = 60;
 
     const double kEnMin = 400., kEnMax = 2000.;    // MeV (o lo que uses)
     const int    kEnBins = 5;
     const bool   kEnLog  = true;
 
-    const double kAmpMin = 16000., kAmpMax = 40000.;
+    const double kAmpMin = 20000., kAmpMax = 40000.;
     const int    kAmpBins = 40;
 
     const char* kOut = ".";                     // directorio de salida
@@ -312,6 +312,21 @@ void cathode_efficiency() {
     std::vector<Long64_t> n(16, 0);
     for (int p = 0; p < 16; ++p) n[p] = (Long64_t)hPat->GetBinContent(p + 1);
 
+    // Los 4 patrones relevantes, escritos como X0 Y0 X1 Y1 (el mismo orden que
+    // PatLabel). El código numérico se calcula a partir de la cadena, así que
+    // no hay que traducir bits a mano.
+    struct KeyPat { const char* code; const char* desc; int p; };
+    std::vector<KeyPat> keyPats = {
+        {"0011", "det 1 only (det 0 lost)", 0},
+        {"1100", "det 0 only (det 1 lost)", 0},
+        {"0111", "X0 missing",              0},
+        {"1110", "Y1 missing",              0},
+    };
+    for (auto& k : keyPats) {
+        k.p = 0;
+        for (int b = 0; b < 4; ++b) if (k.code[b] == '1') k.p |= (1 << b);
+    }
+
     printf("\n=================== 16 COMBINACIONES  (X0 Y0 X1 Y1) ===================\n");
     printf("%-8s %12s %10s %12s\n", "Patrón", "Eventos", "Fracción", "Acumulada");
     printf("-----------------------------------------------------------------------\n");
@@ -360,34 +375,49 @@ void cathode_efficiency() {
            (double)nD1 / nD0);
 
     // =========================================================================
-    //  CANVAS 01 - Poblaciones de los 16 patrones
+    //  CANVAS 01 - Poblaciones de los 4 patrones relevantes
     // =========================================================================
-    TCanvas* c01 = new TCanvas("c01", "patrones", 1100, 700);
+    printf("\n================ 4 PATRONES RELEVANTES  (X0 Y0 X1 Y1) ================\n");
+    for (const auto& k : keyPats)
+        printf("%-6s %-26s %10lld   %6.3f %%\n", k.code, k.desc, n[k.p], 100. * n[k.p] / Ntot);
+
+    TCanvas* c01 = new TCanvas("c01", "patrones", 1000, 700);
     c01->SetGridy();
-    TH1D* hBar = new TH1D("hBar", ";X0 Y0 X1 Y1;fraction of events [%]",
-                          16, 0, 16);
-    for (int k = 0; k < 16; ++k) {
-        const int p = order[k];
-        hBar->SetBinContent(k + 1, 100. * n[p] / Ntot);
-        hBar->GetXaxis()->SetBinLabel(k + 1, PatLabel(p));
+    c01->SetBottomMargin(0.18);
+    const int nKey = (int)keyPats.size();
+    TH1D* hFrame01 = new TH1D("hFrame01", ";;fraction of events [%]", nKey, 0, nKey);
+    double barMax = 0;
+    for (int k = 0; k < nKey; ++k) {
+        barMax = std::max(barMax, 100. * n[keyPats[k].p] / Ntot);
+        hFrame01->GetXaxis()->SetBinLabel(k + 1,
+            Form("#splitline{#bf{%s}}{#scale[0.8]{%s}}", keyPats[k].code, keyPats[k].desc));
     }
-    hBar->SetFillColorAlpha(NiceColor(0), 0.75);
-    hBar->SetLineColor(NiceColor(0));
-    hBar->SetBarWidth(0.8);
-    hBar->SetBarOffset(0.1);
-    hBar->GetXaxis()->LabelsOption("v");
-    hBar->GetXaxis()->SetLabelSize(0.040);
-    hBar->SetMinimum(0);
-    hBar->SetMaximum(1.25 * hBar->GetMaximum());
-    hBar->Draw("BAR");
+    hFrame01->GetXaxis()->SetLabelSize(0.045);
+    hFrame01->GetXaxis()->SetLabelOffset(0.012);
+    hFrame01->SetMinimum(0);
+    hFrame01->SetMaximum(1.25 * (barMax > 0 ? barMax : 1));
+    hFrame01->SetLineWidth(0);
+    hFrame01->Draw("AXIS");
+    for (int k = 0; k < nKey; ++k) {                   // una barra por patrón, cada una en su color
+        TH1D* hb = new TH1D(Form("hBar_%d", k), "", nKey, 0, nKey);
+        hb->SetBinContent(k + 1, 100. * n[keyPats[k].p] / Ntot);
+        hb->SetFillColorAlpha(NiceColor(k), 0.80);
+        hb->SetLineColor(NiceColor(k));
+        hb->SetLineWidth(2);
+        hb->SetBarWidth(0.6);
+        hb->SetBarOffset(0.2);
+        hb->Draw("BAR SAME");
+    }
     {
-        TLatex l; l.SetTextFont(42); l.SetTextSize(0.028); l.SetTextAlign(21);
+        TLatex l; l.SetTextFont(42); l.SetTextSize(0.036); l.SetTextAlign(21);
         l.SetTextColor(kGray + 3);
-        for (int k = 0; k < 16; ++k)
-            if (hBar->GetBinContent(k + 1) > 0.05)
-                l.DrawLatex(k + 0.5, hBar->GetBinContent(k + 1) * 1.03,
-                            Form("%.1f", hBar->GetBinContent(k + 1)));
+        for (int k = 0; k < nKey; ++k) {
+            const double v = 100. * n[keyPats[k].p] / Ntot;
+            l.DrawLatex(k + 0.5, v + 0.03 * hFrame01->GetMaximum(),
+                        Form("%.2f %%  (N = %lld)", v, n[keyPats[k].p]));
+        }
     }
+    c01->RedrawAxis();
     DrawHeader(Form("%s  |  N = %lld  |  runs excluidos: 118771, 118789",
                     CFG::kTree, Ntot));
     Save(c01, "01_patrones");
@@ -724,53 +754,38 @@ void cathode_efficiency() {
     Save(c09, "09_eff_vs_run");
 
     // =========================================================================
-    //  CANVAS 10 - dt de cada patrón (la versión bonita de tu 4x4)
+    //  CANVAS 10 - dt de los 4 patrones relevantes (2 x 2), mismos colores que 01
     // =========================================================================
-    TCanvas* c10 = new TCanvas("c10", "dt per combination of cathodes", 1500, 1150);
-    c10->Divide(4, 4, 0.001, 0.001);
-    for (int k = 0; k < 16; ++k) {
-        const int p = order[k];
+    TCanvas* c10 = new TCanvas("c10", "dt per combination of cathodes", 1300, 1000);
+    c10->Divide(2, 2, 0.001, 0.001);
+    for (int k = 0; k < nKey; ++k) {
+        const int p = keyPats[k].p;
         c10->cd(k + 1);
         gPad->SetGridx(); gPad->SetGridy();
-        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16);
+        gPad->SetLeftMargin(0.15); gPad->SetBottomMargin(0.14);
+        gPad->SetTopMargin(0.11);
         TString cut = TString::Format("(%s) && (hasX0 + 2*hasY0 + 4*hasX1 + 8*hasY1)==%d",
                                       BASE.Data(), p);
         TH1D* h = Proj1D(T, Form("hdt_%d", p), CFG::kDT, cut,
                          CFG::kDTbins, CFG::kDTmin, CFG::kDTmax);
-        h->SetTitle(Form("%s   (N = %lld);#Deltat [ns];cuentas", PatLabel(p).Data(), n[p]));
-        h->SetTitleSize(0.075);
-        h->GetXaxis()->SetTitleSize(0.065); h->GetXaxis()->SetLabelSize(0.055);
-        h->GetYaxis()->SetTitleSize(0.065); h->GetYaxis()->SetLabelSize(0.055);
-        h->GetYaxis()->SetTitleOffset(1.25);
-        // color continuo a lo largo de la paleta viridis, ordenado por población
-        static const std::vector<int> kTurboPalette = {
-    TColor::GetColor("#30123B"),  // 0
-    TColor::GetColor("#3A2E8E"),  // 1
-    TColor::GetColor("#4145AB"),  // 2
-    TColor::GetColor("#4062D9"),  // 3
-    TColor::GetColor("#4675ED"),  // 4
-    TColor::GetColor("#3F8BF7"),  // 5
-    TColor::GetColor("#39A2FC"),  // 6
-    TColor::GetColor("#2AB9E5"),  // 7
-    TColor::GetColor("#1BCFD4"),  // 8
-    TColor::GetColor("#20DEBB"),  // 9
-    TColor::GetColor("#26EDA2"),  // 10
-    TColor::GetColor("#50F57E"),  // 11
-    TColor::GetColor("#7BFC6B"),  // 12
-    TColor::GetColor("#A6E54F"),  // 13
-    TColor::GetColor("#D1E834"),  // 14
-    TColor::GetColor("#F9BA38")   // 15
-};
-const int ci = kTurboPalette[k % kTurboPalette.size()];
+        h->SetTitle(Form("#bf{%s}  %s   (N = %lld);#Deltat = tof_{1} - tof_{0}  [ns];counts",
+                         keyPats[k].code, keyPats[k].desc, n[p]));
+        h->GetXaxis()->SetTitleSize(0.055); h->GetXaxis()->SetLabelSize(0.048);
+        h->GetYaxis()->SetTitleSize(0.055); h->GetYaxis()->SetLabelSize(0.048);
+        h->GetYaxis()->SetTitleOffset(1.30);
+        const int ci = NiceColor(k);
         h->SetLineColor(ci);
-        h->SetFillColorAlpha(ci, 0.45);
-        h->SetLineWidth(2);
+        h->SetFillColorAlpha(ci, 0.35);
+        h->SetLineWidth(3);
         if (h->GetEntries() > 0) {
+            h->SetMaximum(1.15 * h->GetMaximum());
             h->Draw("HIST");
+            TLine* z = new TLine(0, 0, 0, h->GetMaximum());
+            z->SetLineStyle(2); z->SetLineColor(kGray + 2); z->Draw();
         } else {
-            TLatex t; t.SetNDC(); t.SetTextAlign(22); t.SetTextSize(0.12);
+            TLatex t; t.SetNDC(); t.SetTextAlign(22); t.SetTextSize(0.08);
             t.SetTextColor(kGray + 1);
-            t.DrawLatex(0.5, 0.5, "sin eventos");
+            t.DrawLatex(0.5, 0.5, Form("%s: sin eventos", keyPats[k].code));
         }
     }
     Save(c10, "10_dt_por_patron");

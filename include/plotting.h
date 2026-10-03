@@ -1,9 +1,16 @@
 #pragma once
 #include "types.h"
 #include "TCanvas.h"
-#include "TGraphErrors.h"
+#include "TPad.h"
+#include "TVirtualPad.h"
 #include "TGraph.h"
+#include "TGraphErrors.h"
+#include "TGraphAsymmErrors.h"
+#include "TH1.h"
 #include "TH1D.h"
+#include "TH1F.h"
+#include "TAxis.h"
+#include "TGaxis.h"
 #include "TF1.h"
 #include "TStyle.h"
 #include "TLatex.h"
@@ -11,10 +18,10 @@
 #include "TColor.h"
 #include "TLegend.h"
 #include "TFile.h"
-#include "TVirtualPad.h"
 #include <vector>
 #include <string>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -22,63 +29,183 @@
 #include "../include/fit_anisotropy.h"
 
 // ========================================================================
-// House style for all publication figures in this analysis.
+//  ESTILO DE PUBLICACION
 //
-// One style function (setPubStyle) and one color source (okabeIto, the
-// colorblind-safe 8-color qualitative palette standard in modern
-// particle-physics papers) are shared by every plotting function below.
-// Each figure gets its own accent color from that same palette so that,
-// placed side by side in a thesis/note, they read as one consistent set
-// rather than four different plotting styles glued together.
+//  Todas las figuras comparten:
+//    - una sola funcion de estilo (setPubStyle) y unos pocos helpers de
+//      marco, leyenda y cabecera, para que tamanos y margenes coincidan;
+//    - una paleta sobria: tinta casi negra para ejes, azul profundo para
+//      los datos, terracota para los ajustes, verde azulado para los
+//      residuos, granate para W(0)/W(90), grises claros para referencias;
+//    - una paleta secuencial (azul -> verde azulado -> ambar -> terracota
+//      -> granate) cuando las series son bines de energia ORDENADOS, y una
+//      categorica (Paul Tol "muted", apta para daltonicos) para conjuntos
+//      sin orden, como los datos de EXFOR.
+//  Las leyendas se colocan en un hueco reservado en la parte superior del
+//  marco (el rango en y se amplia lo necesario), asi nunca tapan datos.
+//
+//  Novedades de esta version:
+//    - etiqueta de figura opcional (setFigureTag) arriba a la derecha de
+//      las figuras de un solo panel, p. ej. "^{197}Au(n,f), MC";
+//    - ejes log con etiquetas en {1,2,5}x10^n cuando el rango cubre
+//      menos de ~2 decadas (10-900 MeV ya no queda con solo "10, 100");
+//    - series superpuestas desplazadas ligeramente en x (dodge) y con
+//      marcadores distintos, legibles tambien en blanco y negro;
+//    - nombres de canvas unicos: sin avisos "Deleting canvas with same name".
 // ========================================================================
 
+static int hexColor(const char* hex) { return TColor::GetColor(hex); }
+
+// se conserva por compatibilidad con codigo que la use
 static int okabeIto(double r, double g, double b)
 {
     return TColor::GetColor((Float_t)(r/255.), (Float_t)(g/255.), (Float_t)(b/255.));
 }
 
-// full qualitative palette (Okabe & Ito, 2008), CUD-safe, with sky blue and
-// vermillion dropped per house choice — navy blue and burnt orange lead instead
-static std::vector<int> okabeItoPalette()
+// --- colores de la casa --------------------------------------------------
+static const int kInk      = hexColor("#1B1B1B");   // ejes y texto
+static const int kRefGray  = hexColor("#8C8C8C");   // lineas de referencia
+static const int kBandGray = hexColor("#E6E6E6");   // bandas de referencia
+
+static const int kAnisoColor    = hexColor("#1F4E79");  // azul profundo   -> datos W(theta)
+static const int kThisWorkColor = hexColor("#1F4E79");  // azul profundo   -> "este trabajo"
+static const int kAnisoFill     = hexColor("#CFDDEA");  // azul muy claro  -> bandas de dispersion
+static const int kFitColor      = hexColor("#D1603D");  // terracota       -> ajustes
+static const int kResidColor    = hexColor("#2A9D8F");  // verde azulado   -> residuos
+static const int kRatioColor    = hexColor("#7A1F4F");  // granate         -> W(0)/W(90) vs E
+static const int kBkgColor      = hexColor("#3A3A3A");  // gris carbon     -> espectros crudos
+static const int kBkgFitColor   = hexColor("#D1603D");  // terracota       -> ajuste de fondo
+static const int kSubColor      = hexColor("#2E7D4F");  // verde bosque    -> espectros restados
+static const int kBkgFill       = hexColor("#DCDCDC");  // relleno del espectro crudo
+static const int kSubFill       = hexColor("#CFE5D8");  // relleno del espectro restado
+
+// --- paletas -------------------------------------------------------------
+// categorica (Paul Tol "muted"): series sin orden
+static std::vector<int> categoricalPalette()
 {
-    return {
-        okabeIto(  0, 114, 178),  // navy blue      (primary accent 1)
-        okabeIto(230, 159,   0),  // burnt orange   (primary accent 2)
-        okabeIto(  0, 158, 115),  // bluish green
-        okabeIto(204, 121, 167),  // reddish purple
-        okabeIto(  0,   0,   0),  // black
-        okabeIto(240, 228,  66)   // yellow (use sparingly — low contrast on white)
-    };
+    return { hexColor("#332288"), hexColor("#CC6677"), hexColor("#117733"),
+             hexColor("#882255"), hexColor("#44AA99"), hexColor("#999933"),
+             hexColor("#AA4499") };
+}
+// compatibilidad con el nombre antiguo
+static std::vector<int> okabeItoPalette() { return categoricalPalette(); }
+
+// EXFOR: la categorica sin el indigo, que se confundiria con "este trabajo"
+static std::vector<int> exforPalette()
+{
+    return { hexColor("#CC6677"), hexColor("#117733"), hexColor("#882255"),
+             hexColor("#44AA99"), hexColor("#999933"), hexColor("#AA4499"),
+             hexColor("#555555") };
 }
 
-// one accent color per figure, all drawn from the palette above
-static const int kAnisoColor  = okabeIto(  0, 114, 178);  // navy blue      -> W(theta) panels
-static const int kRatioColor  = okabeIto(128,   0,  32);  // burgundy       -> W(0)/W(90) vs E
-static const int kBkgColor    = okabeIto(  0,   0,   0);  // black          -> raw TOF spectra
-static const int kBkgFitColor = okabeIto(230, 159,   0);  // burnt orange   -> background fit
-static const int kSubColor    = okabeIto(  0, 158, 115);  // bluish green   -> subtracted spectra
+// secuencial para bines de energia: el color codifica el orden
+static std::vector<int> energyPalette(int n)
+{
+    static const double stops[5][3] = {
+        { 31,  78, 121},   // azul profundo
+        { 42, 157, 143},   // verde azulado
+        {214, 160,  60},   // ambar
+        {209,  96,  61},   // terracota
+        {122,  31,  79}    // granate
+    };
+    std::vector<int> out;
+    for(int i = 0; i < n; ++i){
+        const double t = (n > 1) ? double(i) / (n - 1) : 0.0;
+        const double s = t * 4.0;
+        const int    k = std::min(3, (int)s);
+        const double u = s - k;
+        double rgb[3];
+        for(int j = 0; j < 3; ++j) rgb[j] = stops[k][j] + (stops[k+1][j] - stops[k][j]) * u;
+        out.push_back(TColor::GetColor((Float_t)(rgb[0]/255.), (Float_t)(rgb[1]/255.),
+                                       (Float_t)(rgb[2]/255.)));
+    }
+    return out;
+}
 
+// marcadores abiertos para conjuntos externos (sin triangulos)
+static const int kOpenMarkers[6] = {24, 25, 27, 28, 42, 46};
+
+// marcadores llenos para series propias ordenadas (circulo, cuadrado,
+// rombo, cruz, estrella, aspa): distinguibles sin color
+static const int kSeriesMarkers[6] = {20, 21, 33, 34, 29, 47};
+
+// rombos y estrellas se ven mas pequenos a igual tamano nominal
+static double markerScale(int m)
+{
+    if(m == 33 || m == 29) return 1.35;
+    if(m == 34 || m == 47) return 1.10;
+    return 1.0;
+}
+
+// desplazamiento horizontal de la serie i de n, repartidas en 'width'
+static double dodge(int i, int n, double width)
+{
+    return (n > 1) ? (i - 0.5 * (n - 1)) * width / n : 0.0;
+}
+
+// nombres unicos para canvas y pads
+static std::string uniqueName(const std::string& base)
+{
+    static int counter = 0;
+    return base + "_" + std::to_string(counter++);
+}
+
+// etiqueta de figura (vacia = no se dibuja)
+static std::string& figureTag()
+{
+    static std::string tag;
+    return tag;
+}
+static void setFigureTag(const std::string& s) { figureTag() = s; }
+
+// ========================================================================
+//  helpers de estilo
+// ========================================================================
 static void setPubStyle()
 {
     gStyle->SetOptStat(0);
     gStyle->SetOptTitle(0);
+    gStyle->SetOptFit(0);
+
+    gStyle->SetCanvasColor(kWhite);
+    gStyle->SetPadColor(kWhite);
+    gStyle->SetFrameFillColor(kWhite);
+    gStyle->SetCanvasBorderMode(0);
+    gStyle->SetPadBorderMode(0);
+    gStyle->SetFrameBorderMode(0);
+    gStyle->SetFrameLineWidth(1);
+    gStyle->SetFrameLineColor(kInk);
+
     gStyle->SetPadTickX(1);
     gStyle->SetPadTickY(1);
-    gStyle->SetFrameLineWidth(1);
-    gStyle->SetTickLength(0.025, "XY");
+    gStyle->SetTickLength(0.030, "X");
+    gStyle->SetTickLength(0.020, "Y");
     gStyle->SetNdivisions(510, "X");
     gStyle->SetNdivisions(505, "Y");
+
+    gStyle->SetTextFont(42);
     gStyle->SetLabelFont(42, "xyz");
     gStyle->SetTitleFont(42, "xyz");
-    gStyle->SetTextFont(42);
     gStyle->SetLabelSize(0.045, "xyz");
     gStyle->SetTitleSize(0.050, "xyz");
+    gStyle->SetLabelOffset(0.010, "xyz");
+    gStyle->SetAxisColor(kInk, "xyz");
+    gStyle->SetLabelColor(kInk, "xyz");
+    gStyle->SetTitleColor(kInk, "xyz");
+
+    gStyle->SetEndErrorSize(0);      // barras de error sin remates
+    gStyle->SetErrorX(0.);           // sin barra horizontal en histogramas
+    gStyle->SetMarkerSize(1.0);
+
     gStyle->SetLegendBorderSize(0);
+    gStyle->SetLegendFillColor(0);
     gStyle->SetLegendFont(42);
-    gStyle->SetLegendTextSize(0.032);
+    gStyle->SetLegendTextSize(0.038);
+
+    TGaxis::SetMaxDigits(4);
 }
 
-// grid layout that stays roughly square for a given number of pads
+// cuadricula de pads aproximadamente cuadrada
 static void gridLayout(int n, int& ncol, int& nrow)
 {
     ncol = (int)std::ceil(std::sqrt((double)n));
@@ -87,16 +214,235 @@ static void gridLayout(int n, int& ncol, int& nrow)
 
 static void stylePad(TVirtualPad* pad)
 {
-    pad->SetLeftMargin(0.16);
-    pad->SetBottomMargin(0.14);
-    pad->SetTopMargin(0.06);
+    pad->SetLeftMargin(0.15);
     pad->SetRightMargin(0.04);
+    pad->SetTopMargin(0.05);
+    pad->SetBottomMargin(0.14);
+    pad->SetTickx(1);
+    pad->SetTicky(1);
+    pad->SetFillColor(kWhite);
+}
+
+// Ejes de un marco o histograma. s escala tamanos cuando el pad es mas bajo
+// que la celda (paneles de residuos); los offsets de titulo no se escalan
+// porque ya son proporcionales al tamano de letra.
+static void styleFrame(TH1* fr, const char* xtitle, const char* ytitle,
+                       double s = 1.0, double yoff = 1.45, double xoff = 1.10)
+{
+    TAxis* ax = fr->GetXaxis();
+    TAxis* ay = fr->GetYaxis();
+    ax->SetTitle(xtitle);
+    ay->SetTitle(ytitle);
+    for(TAxis* a : {ax, ay}){
+        a->SetLabelFont(42);
+        a->SetTitleFont(42);
+        a->SetLabelSize(0.045 * s);
+        a->SetTitleSize(0.050 * s);
+        a->SetAxisColor(kInk);
+        a->SetLabelColor(kInk);
+        a->SetTitleColor(kInk);
+    }
+    ax->SetLabelOffset(0.010 * s);
+    ay->SetLabelOffset(0.010);
+    ax->SetTitleOffset(xoff);
+    ay->SetTitleOffset(yoff);
+    ax->SetTickLength(0.030 * s);
+    ay->SetTickLength(0.020);
+}
+
+// eje log estandar: solo decadas (1, 10, 100, 1000), sin notacion 10^n
+// (se conserva por compatibilidad; las figuras nuevas usan logXLabels)
+static void logLabels(TH1* fr)
+{
+    fr->GetXaxis()->SetMoreLogLabels(kFALSE);
+    fr->GetXaxis()->SetNoExponent(kTRUE);
+}
+
+static std::string fmtTick(double v)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%g", v);
+    return buf;
+}
+
+// Etiquetas de un eje X logaritmico. Si el rango cubre mas de ~2.3 decadas
+// basta con las decadas de ROOT; si no, se dibujan a mano en {1,2,5}x10^n,
+// que es lo habitual en revistas (p. ej. 10, 20, 50, 100, 200, 500).
+// Llamar despues de styleFrame y con los margenes del pad ya fijados.
+static void logXLabels(TVirtualPad* pad, TH1* fr, double xmin, double xmax,
+                       double size = 0.045, double offset = 0.012)
+{
+    TAxis* ax = fr->GetXaxis();
+    ax->SetMoreLogLabels(kFALSE);
+    ax->SetNoExponent(kTRUE);
+    if(xmin <= 0.0 || xmax <= xmin) return;
+
+    const double span = std::log10(xmax / xmin);
+    if(span > 2.3) return;
+
+    ax->SetLabelSize(0.0);
+    pad->cd();
+    const double L = pad->GetLeftMargin();
+    const double R = pad->GetRightMargin();
+    const double B = pad->GetBottomMargin();
+
+    TLatex t;
+    t.SetNDC();
+    t.SetTextFont(42);
+    t.SetTextSize(size);
+    t.SetTextColor(kInk);
+    t.SetTextAlign(23);
+
+    const double mult[3] = {1.0, 2.0, 5.0};
+    const int d0 = (int)std::floor(std::log10(xmin));
+    const int d1 = (int)std::ceil (std::log10(xmax));
+    for(int d = d0; d <= d1; ++d)
+        for(double m : mult){
+            const double v = m * std::pow(10.0, d);
+            if(v < xmin * (1.0 - 1e-9) || v > xmax * (1.0 + 1e-9)) continue;
+            const double u = L + (1.0 - L - R) * std::log10(v / xmin) / span;
+            t.DrawLatex(u, B - offset, fmtTick(v).c_str());
+        }
+}
+
+static void styleGraph(TGraph* g, int color, int marker, double size, int lw = 1)
+{
+    g->SetMarkerStyle(marker);
+    g->SetMarkerSize(size);
+    g->SetMarkerColor(color);
+    g->SetLineColor(color);
+    g->SetLineWidth(lw);
+    g->SetFillStyle(0);
+}
+
+static TLegend* makeLegend(double x1, double y1, double x2, double y2, double tsize)
+{
+    TLegend* lg = new TLegend(x1, y1, x2, y2);
+    lg->SetBorderSize(0);
+    lg->SetFillStyle(0);
+    lg->SetTextFont(42);
+    lg->SetTextSize(tsize);
+    lg->SetTextColor(kInk);
+    lg->SetMargin(0.22);
+    return lg;
+}
+
+// Leyenda en la franja superior del marco. xFrom/xTo en fraccion del ancho
+// util, para poder compartir la franja con otro texto.
+static TLegend* topLegend(TVirtualPad* pad, int rows, double rowH, double tsize,
+                          double xFrom = 0.0, double xTo = 1.0)
+{
+    const double L  = pad->GetLeftMargin() + 0.03;
+    const double R  = 1.0 - pad->GetRightMargin() - 0.02;
+    const double yT = 1.0 - pad->GetTopMargin() - 0.015;
+    return makeLegend(L + xFrom * (R - L), yT - rows * rowH, L + xTo * (R - L), yT, tsize);
+}
+
+// fraccion del marco que ocupa un bloque de 'rows' lineas de altura rowH (NDC)
+static double legendFrac(TVirtualPad* pad, int rows, double rowH)
+{
+    const double frameH = 1.0 - pad->GetTopMargin() - pad->GetBottomMargin();
+    return std::min(0.65, (rows * rowH + 0.035) / frameH);
+}
+
+// ymax tal que [ymin, ymax_datos] ocupa la parte inferior (1-frac) del marco
+static double withHeadroom(double ymin, double ymax, double frac)
+{
+    frac = std::max(0.0, std::min(frac, 0.8));
+    return ymin + (ymax - ymin) / (1.0 - frac);
+}
+static double withHeadroomLog(double ymin, double ymax, double frac)
+{
+    frac = std::max(0.0, std::min(frac, 0.8));
+    return ymin * std::pow(ymax / ymin, 1.0 / (1.0 - frac));
+}
+
+static TLine* drawHLine(double x1, double x2, double y,
+                        int style = 2, int color = kRefGray, int width = 1)
+{
+    TLine* l = new TLine(x1, y, x2, y);
+    l->SetLineStyle(style);
+    l->SetLineColor(color);
+    l->SetLineWidth(width);
+    l->Draw();
+    return l;
+}
+
+// banda rellena solida (valida en ejes logaritmicos y en cualquier formato)
+static TGraph* drawBand(double x1, double x2, double ylo, double yhi, int color = kBandGray)
+{
+    TGraph* b = new TGraph(4);
+    b->SetPoint(0, x1, ylo);
+    b->SetPoint(1, x2, ylo);
+    b->SetPoint(2, x2, yhi);
+    b->SetPoint(3, x1, yhi);
+    b->SetFillColor(color);
+    b->SetFillStyle(1001);
+    b->SetLineColor(color);
+    b->SetLineWidth(0);
+    b->Draw("F SAME");
+    return b;
+}
+
+// texto en el margen superior del pad: izquierda y derecha
+static void padHeader(const std::string& left, const std::string& right = "",
+                      double size = 0.050, int leftColor = kInk)
+{
+    TLatex t;
+    t.SetNDC();
+    t.SetTextFont(42);
+    t.SetTextSize(size);
+    const double y = 1.0 - 0.5 * gPad->GetTopMargin();
+    if(!left.empty()){
+        t.SetTextColor(leftColor);
+        t.SetTextAlign(12);
+        t.DrawLatex(gPad->GetLeftMargin(), y, left.c_str());
+    }
+    if(!right.empty()){
+        t.SetTextColor(kInk);
+        t.SetTextAlign(32);
+        t.DrawLatex(1.0 - gPad->GetRightMargin(), y, right.c_str());
+    }
+}
+
+// hueco en el margen superior para la etiqueta de figura (si la hay)
+static void reserveTag(TVirtualPad* pad, double margin = 0.075)
+{
+    if(!figureTag().empty())
+        pad->SetTopMargin(std::max<double>(pad->GetTopMargin(), margin));
+}
+static void drawTag(double size = 0.040)
+{
+    if(!figureTag().empty()) padHeader("", figureTag(), size);
+}
+
+// --- etiquetas de energia -----------------------------------------------
+static std::string fmtE(double v)
+{
+    char buf[32];
+    if(v >= 100.) std::snprintf(buf, sizeof buf, "%.0f", v);
+    else          std::snprintf(buf, sizeof buf, "%.3g", v);
+    return buf;
+}
+// cabeceras de panel:  1.46 < E_n < 2.14 MeV
+static std::string energyHeader(double lo, double hi)
+{
+    return fmtE(lo) + " < E_{n} < " + fmtE(hi) + " MeV";
+}
+// entradas de leyenda:  [1.46, 2.14] MeV
+static std::string energyRange(double lo, double hi)
+{
+    return "[" + fmtE(lo) + ", " + fmtE(hi) + "] MeV";
 }
 
 // ------------------------------------------------------------------------
-// Background fits: one row per energy bin, raw spectrum + fit | subtracted
-// spectrum. energy_bins is optional so existing call sites keep compiling;
-// pass it to get per-row energy labels instead of a bare bin index.
+// Resta de fondo: un panel por bin de energia, en escala logaritmica.
+//   espectro crudo    -> area gris claro con contorno gris
+//   espectro restado  -> linea de color, sin relleno
+//   ajuste del fondo  -> linea discontinua, solo si drawFits = true
+// Para el uranio (el ajuste no describe el fondo) llamar con drawFits =
+// false; en ese caso el vector fits puede ir vacio.
+// En log, los bines <= 0 del espectro restado no aparecen.
 // ------------------------------------------------------------------------
 static void plotBackgroundFits(
     std::vector<TH1D*>& hists_tof,
@@ -104,73 +450,98 @@ static void plotBackgroundFits(
     std::vector<TF1*>&  fits,
     int   nbins,
     const std::string& outname,
-    const std::vector<double>& energy_bins = {})
+    const std::vector<double>& energy_bins = {},
+    bool  drawFits = true)
 {
     setPubStyle();
 
-    TCanvas* c = new TCanvas("c_bkg", "Background fits", 1100, 380*nbins);
-    c->Divide(2, nbins, 0.0002, 0.0002);
+    int ncol, nrow;
+    gridLayout(nbins, ncol, nrow);
+
+    TCanvas* c = new TCanvas(uniqueName("c_bkg").c_str(), "Background subtraction",
+                             520*ncol, 440*nrow);
+    c->Divide(ncol, nrow, 0.001, 0.001);
 
     const bool haveLabels = (int)energy_bins.size() == nbins + 1;
 
     for(int i = 0; i < nbins; ++i){
+        const std::string label = haveLabels
+            ? energyHeader(energy_bins[i], energy_bins[i+1])
+            : std::string(Form("bin %d", i));
+        const bool fitHere = drawFits && i < (int)fits.size() && fits[i];
 
-        std::string label = haveLabels
-            ? Form("%.0f-%.0f MeV", energy_bins[i], energy_bins[i+1])
-            : Form("bin %d", i);
+        TVirtualPad* pad = c->cd(i + 1);
+        stylePad(pad);
+        pad->SetLeftMargin(0.20);
+        pad->SetBottomMargin(0.16);
+        pad->SetTopMargin(0.10);
+        pad->SetLogy();
 
-        // --- left: raw spectrum + fit ---
-        TVirtualPad* pL = c->cd(2*i + 1);
-        stylePad(pL);
-        pL->SetLogy();
+        // copias: no se tocan los histogramas del analisis
+        TH1D* hr = (TH1D*)hists_tof[i]->Clone(Form("%s_pub", hists_tof[i]->GetName()));
+        TH1D* hs = (TH1D*)hists_sub[i]->Clone(Form("%s_pub", hists_sub[i]->GetName()));
+        hr->SetDirectory(nullptr);
+        hs->SetDirectory(nullptr);
 
-        hists_tof[i]->SetTitle(";#Delta t (ns);counts");
-        hists_tof[i]->SetLineColor(kBkgColor);
-        hists_tof[i]->SetMarkerColor(kBkgColor);
-        hists_tof[i]->SetMarkerStyle(20);
-        hists_tof[i]->SetMarkerSize(0.8);
-        hists_tof[i]->GetXaxis()->SetTitleOffset(1.1);
-        hists_tof[i]->GetYaxis()->SetTitleOffset(1.4);
-        hists_tof[i]->Draw("PE");
+        // rango en y a partir de los contenidos positivos de ambos
+        double yPosMin = 1e30, yMax = 0.0;
+        for(TH1D* h : {hr, hs})
+            for(int b = 1; b <= h->GetNbinsX(); ++b){
+                const double v = h->GetBinContent(b);
+                if(v > 0.0){ yPosMin = std::min(yPosMin, v); yMax = std::max(yMax, v); }
+            }
+        if(yMax <= 0.0){ padHeader(label, "", 0.052); continue; }
 
-        fits[i]->SetLineColor(kBkgFitColor);
-        fits[i]->SetLineWidth(2);
-        fits[i]->Draw("SAME");
+        const bool   withLeg = (i == 0);
+        const int    nLeg    = fitHere ? 3 : 2;
+        const double rowH    = 0.062;
+        const double ylo     = 0.5 * yPosMin;
+        const double yTop    = withHeadroomLog(ylo, 1.5 * yMax,
+                                               withLeg ? legendFrac(pad, nLeg, rowH) : 0.0);
 
-        TLatex latL; latL.SetNDC(); latL.SetTextFont(42);
-        latL.SetTextSize(0.06); latL.SetTextAlign(33);
-        latL.DrawLatex(0.94, 0.90, label.c_str());
+        TH1F* fr = pad->DrawFrame(hr->GetXaxis()->GetXmin(), ylo,
+                                  hr->GetXaxis()->GetXmax(), yTop);
+        styleFrame(fr, "#Deltat (ns)", "Counts", 1.0, 1.35);
 
-        // --- right: background-subtracted spectrum ---
-        TVirtualPad* pR = c->cd(2*i + 2);
-        stylePad(pR);
+        hr->SetLineColor(kRefGray);
+        hr->SetLineWidth(1);
+        hr->SetFillColor(kBkgFill);
+        hr->SetFillStyle(1001);
+        hr->SetMarkerSize(0);
+        hr->Draw("HIST SAME");
 
-        hists_sub[i]->SetTitle(";#Delta t (ns);counts (bkg. subtracted)");
-        hists_sub[i]->SetLineColor(kSubColor);
-        hists_sub[i]->SetMarkerColor(kSubColor);
-        hists_sub[i]->SetMarkerStyle(20);
-        hists_sub[i]->SetMarkerSize(0.2);
-        hists_sub[i]->GetXaxis()->SetTitleOffset(1.1);
-        hists_sub[i]->GetYaxis()->SetTitleOffset(1.4);
-        hists_sub[i]->Draw("PE");
-        hists_sub[i]->GetXaxis()->SetLabelSize(0.06);
-        hists_sub[i]->GetXaxis()->SetTitleSize(0.06);
-        hists_sub[i]->GetYaxis()->SetLabelSize(0.06);
-        hists_sub[i]->GetYaxis()->SetTitleSize(0.06);
+        hs->SetLineColor(kSubColor);
+        hs->SetLineWidth(2);
+        hs->SetFillStyle(0);
+        hs->SetMarkerSize(0);
+        hs->Draw("HIST SAME");
 
-        TLine* zero = new TLine(hists_sub[i]->GetXaxis()->GetXmin(), 0.0,
-                                hists_sub[i]->GetXaxis()->GetXmax(), 0.0);
-        zero->SetLineStyle(2);
-        zero->SetLineColor(kGray+1);
-        zero->Draw("SAME");
+        if(fitHere){
+            fits[i]->SetLineColor(kBkgFitColor);
+            fits[i]->SetLineStyle(2);
+            fits[i]->SetLineWidth(2);
+            fits[i]->SetNpx(500);
+            fits[i]->Draw("SAME");
+        }
+
+        if(withLeg){
+            TLegend* lg = topLegend(pad, nLeg, rowH, 0.046, 0.0, 0.85);
+            lg->AddEntry(hr, "Raw spectrum",          "f");
+            lg->AddEntry(hs, "Background subtracted", "l");
+            if(fitHere) lg->AddEntry(fits[i], "Background fit", "l");
+            lg->Draw();
+        }
+
+        padHeader(label, "", 0.052);
+        pad->RedrawAxis();
     }
     c->SaveAs(outname.c_str());
 }
 
 // ------------------------------------------------------------------------
-// Detector efficiency vs cos(theta'), one overlaid series per energy bin.
-// Kept as an overlay (not per-panel) since these curves are meant to be
-// compared directly; styled to match the rest of the house style.
+// Eficiencia frente a cos(theta'), una serie por bin de energia. Colores en
+// orden de energia (paleta secuencial), marcadores distintos por serie y
+// un pequeno desplazamiento en x para que las barras no se solapen.
 // ------------------------------------------------------------------------
 static void plotEfficiency(
     const std::vector<EfficiencyResult>& eff,
@@ -181,55 +552,52 @@ static void plotEfficiency(
 {
     setPubStyle();
 
-    std::vector<double> centers(nbins_det);
-    for(int i = 0; i < nbins_det; ++i) centers[i] = (i + 0.5) * (1.0/nbins_det);
+    const double w = 1.0 / nbins_det;
+    const std::vector<int> col = energyPalette(nbins);
 
-    std::vector<int> palette = okabeItoPalette();
-    const int kSquareMarker = 21;  // filled square, per user request
+    double ydata = 1.0;
+    for(int e = 0; e < nbins; ++e)
+        for(int i = 0; i < nbins_det; ++i){
+            const double v = eff[e].eps[i] + eff[e].u_eps[i];
+            if(std::isfinite(v)) ydata = std::max(ydata, v);
+        }
 
-    TCanvas* c = new TCanvas("c_eff", "Efficiency", 850, 680);
-    stylePad(gPad);
+    TCanvas* c = new TCanvas(uniqueName("c_eff").c_str(), "Efficiency", 820, 640);
+    stylePad(c);
+    reserveTag(c);
 
-    TLegend* leg = new TLegend(0.18, 0.68, 0.50, 0.90);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
+    const int    ncols = nbins > 12 ? 3 : (nbins > 4 ? 2 : 1);
+    const int    rows  = (nbins + ncols - 1) / ncols;
+    const double rowH  = 0.046;
+    const double yTop  = withHeadroom(0.0, 1.03 * ydata, legendFrac(c, rows, rowH));
+
+    TH1F* fr = c->DrawFrame(0.0, 0.0, 1.0, yTop);
+    styleFrame(fr, "cos#theta'", "#varepsilon(cos#theta')");
+    drawHLine(0.0, 1.0, 1.0);
+
+    TLegend* lg = topLegend(c, rows, rowH, 0.034, 0.0, ncols == 1 ? 0.55 : 1.0);
+    lg->SetNColumns(ncols);
 
     for(int e = 0; e < nbins; ++e){
-        int color = palette[e % (int)palette.size()];
-
+        std::vector<double> x(nbins_det);
+        for(int i = 0; i < nbins_det; ++i)
+            x[i] = (i + 0.5) * w + dodge(e, nbins, 0.45 * w);
         TGraphErrors* gr = new TGraphErrors(
-            nbins_det, centers.data(), eff[e].eps.data(),
-            nullptr, eff[e].u_eps.data());
-        gr->SetMarkerStyle(kSquareMarker);
-        gr->SetMarkerColor(color);
-        gr->SetLineColor(color);
-        gr->SetMarkerSize(1.);
-        gr->SetLineWidth(2);
-
-        if(e == 0){
-            gr->SetTitle(";cos(#theta');#varepsilon(cos#theta')");
-            gr->GetXaxis()->SetTitleOffset(1.1);
-            gr->GetYaxis()->SetTitleOffset(1.4);
-            gr->SetMinimum(0.0);
-            gr->SetMaximum(1.25);
-            gr->Draw("AP");
-        } else {
-            gr->Draw("P SAME");
-        }
-        leg->AddEntry(gr,
-            Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]), "lp");
+            nbins_det, x.data(), eff[e].eps.data(), nullptr, eff[e].u_eps.data());
+        const int mk = kSeriesMarkers[e % 6];
+        styleGraph(gr, col[e], mk, 1.0 * markerScale(mk), 2);
+        gr->Draw("P");
+        lg->AddEntry(gr, energyRange(energy_bins[e], energy_bins[e+1]).c_str(), "pe");
     }
-    leg->Draw();
+    lg->Draw();
+    drawTag();
+    c->RedrawAxis();
     c->SaveAs(outname.c_str());
 }
 
 // ------------------------------------------------------------------------
-// Relative resolution of the efficiency, sigma(eps)/eps, vs cos(theta'),
-// one overlaid series per energy bin. Same layout and palette as
-// plotEfficiency so the two figures read as a matched pair (value +
-// uncertainty) rather than two unrelated plots. Log-y by default since
-// the relative uncertainty typically spans more than a decade across the
-// angular range (it blows up wherever eps -> 0, e.g. near cos(theta')=0).
+// Resolucion relativa de la eficiencia, sigma(eps)/eps. Mismo formato,
+// colores y marcadores que plotEfficiency, para leerlas como pareja.
 // ------------------------------------------------------------------------
 static void plotEfficiencyResolution(
     const std::vector<EfficiencyResult>& eff,
@@ -242,74 +610,74 @@ static void plotEfficiencyResolution(
     setPubStyle();
 
     std::vector<double> centers(nbins_det);
-    for(int i = 0; i < nbins_det; ++i) centers[i] = (i + 0.5) * (1.0/nbins_det);
+    for(int i = 0; i < nbins_det; ++i) centers[i] = (i + 0.5) * (1.0 / nbins_det);
 
-    std::vector<int> palette = okabeItoPalette();
-    // circles and squares only, filled then open, cycling — no triangles
-    int markers[] = {20, 21, 24, 25};
-
-    TCanvas* c = new TCanvas("c_eff_res", "Efficiency resolution", 850, 680);
-    stylePad(gPad);
-    if(logy) gPad->SetLogy();
-
-    TLegend* leg = new TLegend(0.18, 0.68, 0.50, 0.90);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
-
-    double ymax_seen = 0.0;
+    const std::vector<int> col = energyPalette(nbins);
 
     std::vector<TGraph*> graphs;
-    graphs.reserve(nbins);
-
+    double ymax = 0.0, yminPos = 1e30;
     for(int e = 0; e < nbins; ++e){
-        int color = palette[e % (int)palette.size()];
-
-        // relative resolution: sigma(eps)/eps, only where eps > 0
         std::vector<double> x, y;
-        x.reserve(nbins_det); y.reserve(nbins_det);
         for(int i = 0; i < nbins_det; ++i){
-            double eps = eff[e].eps[i];
+            const double eps = eff[e].eps[i];
             if(eps <= 0.0) continue;
-            double rel = eff[e].u_eps[i] / eps;
+            const double rel = eff[e].u_eps[i] / eps;
+            if(!std::isfinite(rel)) continue;
             x.push_back(centers[i]);
             y.push_back(rel);
-            if(rel > ymax_seen) ymax_seen = rel;
+            ymax = std::max(ymax, rel);
+            if(rel > 0.0) yminPos = std::min(yminPos, rel);
         }
-
         TGraph* gr = new TGraph((int)x.size(), x.data(), y.data());
+        const int mk = kSeriesMarkers[e % 6];
+        styleGraph(gr, col[e], mk, 1.0 * markerScale(mk), 2);
         graphs.push_back(gr);
-        gr->SetMarkerStyle(markers[e % 4]);
-        gr->SetMarkerColor(color);
-        gr->SetLineColor(color);
-        gr->SetMarkerSize(1.0);
-        gr->SetLineWidth(2);
-
-        if(e == 0){
-            gr->SetTitle(";cos(#theta');#sigma_{#varepsilon} / #varepsilon");
-            gr->GetXaxis()->SetLimits(0.0, 1.0);
-            gr->GetXaxis()->SetTitleOffset(1.1);
-            gr->GetYaxis()->SetTitleOffset(1.4);
-            gr->Draw("ALP");
-        } else {
-            gr->Draw("LP SAME");
-        }
-        leg->AddEntry(gr,
-            Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]), "lp");
+    }
+    if(ymax <= 0.0){
+        std::cerr << "[WARN] plotEfficiencyResolution: nothing to draw\n";
+        return;
     }
 
-    // fix the y-range once all series are known, with headroom for the legend
-    if(!graphs.empty()){
-        double ymin = logy ? 1e-3 : 0.0;
-        double ymax = logy ? ymax_seen * 3.0 : ymax_seen * 1.3;
-        graphs[0]->SetMinimum(ymin);
-        graphs[0]->SetMaximum(ymax);
-        gPad->Modified();
-        gPad->Update();
+    TCanvas* c = new TCanvas(uniqueName("c_eff_res").c_str(), "Efficiency resolution", 820, 640);
+    stylePad(c);
+    reserveTag(c);
+    if(logy) c->SetLogy();
+
+    const int    ncols = nbins > 12 ? 3 : (nbins > 4 ? 2 : 1);
+    const int    rows  = (nbins + ncols - 1) / ncols;
+    const double rowH  = 0.046;
+    const double frac  = legendFrac(c, rows, rowH);
+
+    double ylo, yTop;
+    if(logy){
+        ylo  = 0.5 * yminPos;
+        yTop = withHeadroomLog(ylo, 1.5 * ymax, frac);
+    } else {
+        ylo  = 0.0;
+        yTop = withHeadroom(0.0, 1.05 * ymax, frac);
     }
 
-    leg->Draw();
+    TH1F* fr = c->DrawFrame(0.0, ylo, 1.0, yTop);
+    styleFrame(fr, "cos#theta'", "#sigma_{#varepsilon} / #varepsilon");
+    if(logy) fr->GetYaxis()->SetMoreLogLabels(kTRUE);
+
+    TLegend* lg = topLegend(c, rows, rowH, 0.034, 0.0, ncols == 1 ? 0.55 : 1.0);
+    lg->SetNColumns(ncols);
+    for(int e = 0; e < nbins; ++e){
+        if(graphs[e]->GetN() == 0) continue;
+        graphs[e]->Draw("LP");
+        lg->AddEntry(graphs[e], energyRange(energy_bins[e], energy_bins[e+1]).c_str(), "lp");
+    }
+    lg->Draw();
+    drawTag();
+    c->RedrawAxis();
     c->SaveAs(outname.c_str());
 }
+
+// ------------------------------------------------------------------------
+// W(theta) por bin de energia. Todos los paneles comparten el rango en y,
+// para que se comparen de un vistazo.
+// ------------------------------------------------------------------------
 static void plotAnisotropy(
     const std::vector<AnisotropyResult>& aniso,
     int nbins,
@@ -319,143 +687,123 @@ static void plotAnisotropy(
 {
     setPubStyle();
 
+    double gmin = 1.0, gmax = 1.0;
+    for(int e = 0; e < nbins; ++e)
+        for(int i = 0; i < nbins_beam; ++i){
+            const double v = aniso[e].w[i], u = aniso[e].u_w[i];
+            if(!std::isfinite(v) || !std::isfinite(u)) continue;
+            gmin = std::min(gmin, v - u);
+            gmax = std::max(gmax, v + u);
+        }
+    const double m   = 0.08 * (gmax - gmin);
+    const double ylo = std::max(0.0, gmin - m);
+    const double yhi = gmax + m;
+
     int ncol, nrow;
     gridLayout(nbins, ncol, nrow);
 
-    TCanvas* c = new TCanvas("c_aniso", "Anisotropy", 480*ncol, 420*nrow);
-    c->Divide(ncol, nrow, 0.0002, 0.0002);
+    TCanvas* c = new TCanvas(uniqueName("c_aniso").c_str(), "Anisotropy", 500*ncol, 440*nrow);
+    c->Divide(ncol, nrow, 0.001, 0.001);
 
     for(int e = 0; e < nbins; ++e){
-
         std::vector<double> x(nbins_beam), y(nbins_beam), ex(nbins_beam, 0.0);
         for(int i = 0; i < nbins_beam; ++i){
             x[i] = (i + 0.5) * dcos_beam;
             y[i] = aniso[e].w[i];
         }
 
-        TGraphErrors* g = new TGraphErrors(
-            nbins_beam, x.data(), y.data(), ex.data(), aniso[e].u_w.data());
-
-        g->SetMarkerStyle(20);
-        g->SetMarkerSize(.6);
-        g->SetMarkerColor(kAnisoColor);
-        g->SetLineColor(kAnisoColor);
-        g->SetLineWidth(2);
-
         TVirtualPad* pad = c->cd(e + 1);
         stylePad(pad);
-        pad->SetLeftMargin(0.18);
+        pad->SetLeftMargin(0.20);
         pad->SetBottomMargin(0.16);
+        pad->SetTopMargin(0.10);
 
-        g->SetTitle(";cos(#theta_{beam});W(#theta) / W(90^{#circ})");
-        g->GetXaxis()->SetLimits(0.0, 1.0);
-        g->SetMinimum(0.4);
-        g->SetMaximum(2.);
-        g->GetXaxis()->SetTitleOffset(1.05);
-        g->GetYaxis()->SetTitleOffset(1.35);
-        g->Draw("AP");
+        TH1F* fr = pad->DrawFrame(0.0, ylo, 1.0, yhi);
+        styleFrame(fr, "cos#theta_{beam}", "W(#theta)/W(90^{#circ})", 1.0, 1.35);
+        drawHLine(0.0, 1.0, 1.0);
 
-        TLine* ref = new TLine(0.0, 1.0, 1.0, 1.0);
-        ref->SetLineStyle(2);
-        ref->SetLineColor(kGray + 1);
-        ref->SetLineWidth(1);
-        ref->Draw("SAME");
+        TGraphErrors* g = new TGraphErrors(
+            nbins_beam, x.data(), y.data(), ex.data(), aniso[e].u_w.data());
+        styleGraph(g, kAnisoColor, 20, 1.0, 2);
+        g->Draw("P");
 
-        TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
-        lat.SetTextSize(0.065); lat.SetTextAlign(33);
-        lat.DrawLatex(0.94, 0.90,
-                      Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]));
-
-        g->Draw("P SAME");
+        padHeader(energyHeader(energy_bins[e], energy_bins[e+1]), "", 0.056);
+        pad->RedrawAxis();
     }
     c->SaveAs(outname.c_str());
 }
 
 // ------------------------------------------------------------------------
-// W(0)/W(90) vs neutron energy, single overlay figure.
+// W(0)/W(90) frente a la energia. En la figura, las barras horizontales
+// cubren el bin real (asimetricas en escala log); en el .root se guarda el
+// mismo TGraphErrors que antes para no romper nada aguas abajo.
 // ------------------------------------------------------------------------
 static void plotAnisotropyRatio(
     const std::vector<AnisotropyResult>& aniso,
     int nbins,
     int nbins_beam,
     const std::vector<double>& energy_bins,
-    const std::string& outname)
+    const std::string& outname,
+    const std::string& reaction_label = "^{238}U(n,f)")
 {
-    int bin_0 = nbins_beam - 1;
+    setPubStyle();
+
+    const int bin_0 = nbins_beam - 1;
 
     std::vector<double> E_centers(nbins), ratio(nbins), u_ratio(nbins), ex(nbins);
     for(int e = 0; e < nbins; ++e){
         E_centers[e] = std::sqrt(energy_bins[e] * energy_bins[e+1]);
         ratio[e]     = aniso[e].w[bin_0];
         u_ratio[e]   = aniso[e].u_w[bin_0];
-        // asymmetric in principle (log-spaced bins), TGraphErrors only takes
-        // one value: use half the *linear* bin width as a simple width proxy
         ex[e]        = 0.5 * (energy_bins[e+1] - energy_bins[e]);
     }
-
-    setPubStyle();
-
-    TCanvas* c = new TCanvas("c_ratio", "", 800, 650);
-    c->SetLogx();
-    stylePad(gPad);
-    c->SetLeftMargin(0.13);
-    c->SetBottomMargin(0.13);
-
     TGraphErrors* g = new TGraphErrors(
         nbins, E_centers.data(), ratio.data(), ex.data(), u_ratio.data());
 
-    g->SetMarkerStyle(20);
-    g->SetMarkerSize(1.);
-    g->SetMarkerColor(kRatioColor);
-    g->SetLineColor(kRatioColor);
-    g->SetLineWidth(1);
-
-    g->GetXaxis()->SetTitle("Neutron energy  E_{n}  (MeV)");
-    g->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
-    g->GetXaxis()->SetTitleOffset(1.2);
-    g->GetYaxis()->SetTitleOffset(1.3);
-    g->GetYaxis()->SetRangeUser(0.5, 2.0);
-    g->GetXaxis()->SetMoreLogLabels();
-    g->GetXaxis()->SetNoExponent();
-    g->Draw("AP");
-
-    TLine* line = new TLine(energy_bins.front(), 1.0, energy_bins.back(), 1.0);
-    line->SetLineStyle(7);
-    line->SetLineColor(kGray+1);
-    line->SetLineWidth(2);
-    line->Draw();
-
-    int nband = 200;
-    std::vector<double> xb(nband), yhi(nband), ylo(nband);
-    double logA = std::log10(energy_bins.front());
-    double logB = std::log10(energy_bins.back());
-    for(int i = 0; i < nband; ++i){
-        xb[i]  = std::pow(10.0, logA + (logB - logA) * i / (nband - 1));
-        yhi[i] = 1.05;
-        ylo[i] = 0.95;
+    // grafico para dibujar: barra horizontal = anchura real del bin
+    TGraphAsymmErrors* gd = new TGraphAsymmErrors(nbins);
+    double ymin = 0.95, ymax = 1.05;
+    for(int e = 0; e < nbins; ++e){
+        gd->SetPoint(e, E_centers[e], ratio[e]);
+        gd->SetPointError(e, E_centers[e] - energy_bins[e], energy_bins[e+1] - E_centers[e],
+                          u_ratio[e], u_ratio[e]);
+        ymin = std::min(ymin, ratio[e] - u_ratio[e]);
+        ymax = std::max(ymax, ratio[e] + u_ratio[e]);
     }
-    TGraph* band = new TGraph(2 * nband);
-    for(int i = 0;       i < nband; ++i) band->SetPoint(i,          xb[i],        yhi[i]);
-    for(int i = 0;       i < nband; ++i) band->SetPoint(nband + i,  xb[nband-1-i], ylo[nband-1-i]);
-    band->SetFillColorAlpha(kGray, 0.25);
-    band->SetLineWidth(0);
-    band->Draw("F SAME");
+    styleGraph(gd, kRatioColor, 20, 1.1, 2);
+    styleGraph(g,  kRatioColor, 20, 1.1);
 
-    g->Draw("P SAME");
+    const double xmin = energy_bins.front(), xmax = energy_bins.back();
 
-    TLegend* leg = new TLegend(0.55, 0.74, 0.93, 0.93);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
-    leg->AddEntry(g,    "^{238}U(n,f)  W(0^{#circ})/W(90^{#circ})", "lp");
-    leg->AddEntry(line, "Isotropic",                                  "l");
-    leg->AddEntry(band, "#pm5% band",                                 "f");
-    leg->Draw();
+    TCanvas* c = new TCanvas(uniqueName("c_ratio").c_str(), "", 820, 620);
+    stylePad(c);
+    reserveTag(c);
+    c->SetLogx();
 
+    const double m    = 0.08 * (ymax - ymin);
+    const double ylo  = ymin - m;
+    const double yTop = withHeadroom(ylo, ymax + m, legendFrac(c, 3, 0.052));
+
+    TH1F* fr = c->DrawFrame(xmin, ylo, xmax, yTop);
+    styleFrame(fr, "E_{n} (MeV)", "W(0^{#circ}) / W(90^{#circ})");
+    logXLabels(c, fr, xmin, xmax);
+
+    TGraph* band = drawBand(xmin, xmax, 0.95, 1.05);
+    TLine*  line = drawHLine(xmin, xmax, 1.0, 7, kRefGray, 2);
+    gd->Draw("P");
+
+    TLegend* lg = topLegend(c, 3, 0.052, 0.038, 0.0, 0.62);
+    lg->AddEntry(gd,   (reaction_label + "  W(0^{#circ})/W(90^{#circ})").c_str(), "pe");
+    lg->AddEntry(line, "Isotropic",  "l");
+    lg->AddEntry(band, "#pm5% band", "f");
+    lg->Draw();
+
+    drawTag();
     c->RedrawAxis();
     c->SaveAs((outname + ".pdf").c_str());
 
-    TFile *fout = new TFile((outname + ".root").c_str(), "RECREATE");
-    if (!fout || fout->IsZombie()) {
+    TFile* fout = TFile::Open((outname + ".root").c_str(), "RECREATE");
+    if(!fout || fout->IsZombie()){
         std::cerr << "[ERROR] Cannot create output ROOT file: " << outname << ".root\n";
         return;
     }
@@ -469,42 +817,23 @@ static void plotAnisotropyRatio(
 }
 
 // ========================================================================
-// Comparison of this-work anisotropy vs (any number of) EXFOR datasets.
+//  Comparacion con EXFOR
 //
-// EXFOR CSV exports for DA (angular-distribution-ratio) quantities do not
-// use a fixed column set: e.g. dataset 13709003 gives the y-error as
-// "DATA-ERR (NO-DIM)", while 14660003 gives it as "ERR-T (NO-DIM)". The
-// loader below matches by column-name PREFIX so it tolerates that, plus
-// the resolution column being either a half-width (EN-RSL-HW) or a full
-// width (EN-RSL) depending on the entry.
+//  Los CSV de EXFOR para magnitudes DA no tienen columnas fijas (el error
+//  puede llamarse "DATA-ERR (NO-DIM)" o "ERR-T (NO-DIM)", la resolucion
+//  puede ser semi-anchura o anchura completa): el lector busca por PREFIJO.
 // ========================================================================
 
-static const int kThisWorkColor = okabeIto(  0, 114, 178);  // navy blue — "this work", squares
-
-// EXFOR accent colors: everything in the palette except navy (reserved
-// for "this work") and yellow (too low-contrast to trust for data points)
-static std::vector<int> exforPalette()
-{
-    return {
-        okabeIto(128,   0,  32),  // burgundy
-        okabeIto(  0, 158, 115),  // bluish green
-        okabeIto(204, 121, 167),  // reddish purple
-        okabeIto(230, 159,   0),  // burnt orange
-        okabeIto(  0,   0,   0)   // black
-    };
-}
-
-// minimal CSV line parser: handles double-quoted fields that themselves
-// contain commas (EXFOR's Reacode column does exactly this)
+// CSV con campos entre comillas que contienen comas (columna Reacode)
 static std::vector<std::string> parseCsvLine(const std::string& line)
 {
     std::vector<std::string> fields;
     std::string cur;
     bool inQuotes = false;
-    for(char c : line){
-        if(c == '"'){ inQuotes = !inQuotes; continue; }
-        if(c == ',' && !inQuotes){ fields.push_back(cur); cur.clear(); continue; }
-        cur += c;
+    for(char ch : line){
+        if(ch == '"'){ inQuotes = !inQuotes; continue; }
+        if(ch == ',' && !inQuotes){ fields.push_back(cur); cur.clear(); continue; }
+        cur += ch;
     }
     fields.push_back(cur);
     return fields;
@@ -512,7 +841,7 @@ static std::vector<std::string> parseCsvLine(const std::string& line)
 
 struct ExforSource {
     std::string path;
-    std::string label = "";   // leave empty to auto-build from author1/year1/DatasetID
+    std::string label = "";   // vacio: se construye como "Autor (anio)"
 };
 
 struct ExforData {
@@ -520,9 +849,6 @@ struct ExforData {
     std::string   label;
 };
 
-// Loads one EXFOR DA-ratio CSV export. Energy EN (EV) -> MeV on X;
-// DATA (NO-DIM) -> Y; best available *_ERR/*_ERR-T column -> Y error;
-// EN-RSL(-HW) (EV) -> MeV, used as X half-width if present.
 static ExforData loadExforAniso(const ExforSource& src)
 {
     ExforData out;
@@ -540,7 +866,7 @@ static ExforData loadExforAniso(const ExforSource& src)
     auto findCol = [&](std::initializer_list<const char*> candidates) -> int {
         for(auto cand : candidates)
             for(size_t i = 0; i < header.size(); ++i)
-                if(header[i].rfind(cand, 0) == 0)   // match by prefix
+                if(header[i].rfind(cand, 0) == 0)
                     return (int)i;
         return -1;
     };
@@ -550,8 +876,6 @@ static ExforData loadExforAniso(const ExforSource& src)
     int iAuth  = findCol({"author1"});
     int iEN    = findCol({"EN (EV)"});
     int iDATA  = findCol({"DATA (NO-DIM)"});
-    // absolute (NO-DIM) error columns take priority; PER-CENT is a fallback
-    // that must be converted to an absolute error using the DATA value
     int iERR_abs = findCol({"DATA-ERR (NO-DIM)", "ERR-T (NO-DIM)", "ERR (NO-DIM)"});
     int iERR_pct = findCol({"DATA-ERR (PER-CENT)", "ERR-T (PER-CENT)", "ERR (PER-CENT)"});
     int iERR     = (iERR_abs >= 0) ? iERR_abs : iERR_pct;
@@ -578,15 +902,15 @@ static ExforData loadExforAniso(const ExforSource& src)
         auto fld = parseCsvLine(line);
         if((int)fld.size() <= std::max({iEN, iDATA, iERR})) continue;
 
-        if(ds_id.empty() && iID >= 0 && (int)fld.size() > iID) ds_id  = fld[iID];
+        if(ds_id.empty()  && iID   >= 0 && (int)fld.size() > iID)   ds_id  = fld[iID];
         if(author.empty() && iAuth >= 0 && (int)fld.size() > iAuth) author = fld[iAuth];
-        if(year.empty()  && iYear >= 0 && (int)fld.size() > iYear) year   = fld[iYear];
+        if(year.empty()   && iYear >= 0 && (int)fld.size() > iYear) year   = fld[iYear];
 
         try{
             double E   = std::stod(fld[iEN]) * 1e-6;    // eV -> MeV
             double y   = std::stod(fld[iDATA]);
             double eyv = std::stod(fld[iERR]);
-            if(errIsPercent) eyv = y * eyv / 100.0;     // % -> absolute
+            if(errIsPercent) eyv = y * eyv / 100.0;
             double exv = 0.0;
             if(iRSL >= 0 && (int)fld.size() > iRSL && !fld[iRSL].empty()){
                 double rsl = std::stod(fld[iRSL]) * 1e-6;
@@ -594,7 +918,7 @@ static ExforData loadExforAniso(const ExforSource& src)
             }
             ex.push_back(E); ey.push_back(y);
             ex_err.push_back(exv); ey_err.push_back(eyv);
-        } catch(...){ continue; }   // skip malformed/header-repeat rows
+        } catch(...){ continue; }
     }
 
     if(ex.empty()){
@@ -604,24 +928,19 @@ static ExforData loadExforAniso(const ExforSource& src)
 
     out.graph = new TGraphErrors((int)ex.size(),
         ex.data(), ey.data(), ex_err.data(), ey_err.data());
-    out.graph->GetYaxis()->SetRangeUser(0.5, 2.0);
 
     if(!src.label.empty()){
         out.label = src.label;
     } else {
-        std::string entry = ds_id.size() >= 5 ? ds_id.substr(0, 5) : ds_id;
-        out.label = (author.empty() ? "EXFOR" : author);
+        out.label = !author.empty() ? author
+                  : (!ds_id.empty() ? "EXFOR " + ds_id : std::string("EXFOR"));
+        if(year.size() >= 4) out.label += " (" + year.substr(0, 4) + ")";
     }
     return out;
 }
 
-// Rough compatibility metric between "this work" and one EXFOR set:
-// for each EXFOR point inside this-work's energy range, linearly
-// interpolate this-work's value at that energy (in log E) and form a
-// pull using the EXFOR point's own uncertainty. This is NOT a rigorous
-// chi2 (this-work's own uncertainty at the interpolated point is not
-// included), but it is a fast, honest-enough "how far off are we" number
-// for a diagnostic panel label.
+// Metrica rapida de compatibilidad (solo el error de EXFOR): ver comentario
+// de computePulls para la version con ambos errores.
 static bool chi2PerPointVsThis(TGraphErrors* ext, TGraphErrors* mine,
                                double& chi2_per_n, int& n_used)
 {
@@ -633,7 +952,7 @@ static bool chi2PerPointVsThis(TGraphErrors* ext, TGraphErrors* mine,
     double sum = 0.0; int n = 0;
     for(int i = 0; i < ext->GetN(); ++i){
         double x = ext->GetX()[i];
-        if(x < mx[0] || x > mx[nMine-1]) continue;   // no extrapolation
+        if(x < mx[0] || x > mx[nMine-1]) continue;
 
         int k = (int)(std::lower_bound(mx, mx+nMine, x) - mx);
         if(k == 0) k = 1;
@@ -654,7 +973,7 @@ static bool chi2PerPointVsThis(TGraphErrors* ext, TGraphErrors* mine,
 }
 
 // ------------------------------------------------------------------------
-// Overlay: this work vs any number of EXFOR sources, single figure.
+// Este trabajo frente a varios conjuntos de EXFOR, en una figura.
 // ------------------------------------------------------------------------
 static void plotAnisoVsExfor(
     TGraphErrors* g_this,
@@ -664,93 +983,75 @@ static void plotAnisoVsExfor(
 {
     setPubStyle();
 
+    if(!g_this){
+        std::cerr << "[ERROR] plotAnisoVsExfor: this-work graph is null\n";
+        return;
+    }
     std::vector<ExforData> exfor;
     for(auto& s : sources){
         ExforData d = loadExforAniso(s);
         if(d.graph) exfor.push_back(d);
     }
-    if(!g_this){
-        std::cerr << "[ERROR] plotAnisoVsExfor: this-work graph is null\n";
-        return;
-    }
 
-    double ymin = 1e9, ymax = -1e9;
+    double ymin = 1.0, ymax = 1.0;
     auto updateRange = [&](TGraphErrors* g){
         for(int i = 0; i < g->GetN(); ++i){
-            double v = g->GetY()[i], e = g->GetEY()[i];
+            const double x = g->GetX()[i];
+            if(x < xmin || x > xmax) continue;
+            const double v = g->GetY()[i], e = g->GetEY()[i];
             ymin = std::min(ymin, v - e);
             ymax = std::max(ymax, v + e);
         }
     };
     updateRange(g_this);
     for(auto& d : exfor) updateRange(d.graph);
-    double margin = (ymax - ymin) * 0.15;
-    ymin -= margin; ymax += margin;
+    const double m = 0.08 * (ymax - ymin);
 
-    TCanvas* c = new TCanvas("c_aniso_exfor", "Anisotropy vs EXFOR", 900, 650);
+    const int nEntries = (int)exfor.size() + 2;
+    const int ncols    = nEntries > 4 ? 2 : 1;
+    const int rows     = (nEntries + ncols - 1) / ncols;
+    const double rowH  = 0.050;
+
+    TCanvas* c = new TCanvas(uniqueName("c_aniso_exfor").c_str(), "Anisotropy vs EXFOR", 880, 640);
+    stylePad(c);
+    reserveTag(c);
     c->SetLogx();
-    stylePad(gPad);
 
-    TH1F* frame = c->DrawFrame(xmin, ymin, xmax, ymax);
-    frame->GetXaxis()->SetTitle("E_{n} (MeV)");
-    frame->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
-    frame->GetXaxis()->SetTitleOffset(1.15);
-    frame->GetYaxis()->SetTitleOffset(1.3);
-    frame->GetXaxis()->SetMoreLogLabels();
-    frame->GetXaxis()->SetNoExponent();
+    const double ylo  = ymin - m;
+    const double yTop = withHeadroom(ylo, ymax + m, legendFrac(c, rows, rowH));
 
-    TLine* line = new TLine(xmin, 1.0, xmax, 1.0);
-    line->SetLineStyle(2);
-    line->SetLineColor(kGray+1);
-    line->SetLineWidth(1);
-    line->Draw();
+    TH1F* fr = c->DrawFrame(xmin, ylo, xmax, yTop);
+    styleFrame(fr, "E_{n} (MeV)", "W(0^{#circ}) / W(90^{#circ})");
+    logXLabels(c, fr, xmin, xmax);
 
-    TLegend* leg = new TLegend(0.55, 0.72 - 0.045*exfor.size(), 0.93, 0.92);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
+    TLine* line = drawHLine(xmin, xmax, 1.0);
 
-    // EXFOR sources: open circles, one color each, drawn first (background)
-    std::vector<int> pal = exforPalette();
+    TLegend* lg = topLegend(c, rows, rowH, 0.036);
+    lg->SetNColumns(ncols);
+
+    // este trabajo: estilo fijado ya, se dibuja al final (primer plano)
+    styleGraph(g_this, kThisWorkColor, 21, 1.3, 2);
+    lg->AddEntry(g_this, "This work", "pe");
+
+    const std::vector<int> pal = exforPalette();
     for(size_t k = 0; k < exfor.size(); ++k){
-        int color = pal[k % pal.size()];
-        exfor[k].graph->SetMarkerStyle(24);   // open circle
-        exfor[k].graph->SetMarkerSize(1.);
-        exfor[k].graph->SetMarkerColor(color);
-        exfor[k].graph->SetLineColor(color);
-        exfor[k].graph->SetLineWidth(1);
-        exfor[k].graph->Draw("P SAME");
-        leg->AddEntry(exfor[k].graph, exfor[k].label.c_str(), "lp");
+        styleGraph(exfor[k].graph, pal[k % pal.size()], kOpenMarkers[k % 6], 1.0, 1);
+        exfor[k].graph->Draw("P");
+        lg->AddEntry(exfor[k].graph, exfor[k].label.c_str(), "pe");
     }
+    g_this->Draw("P");
 
-    // this work: filled navy square, drawn last (foreground)
-    g_this->SetMarkerStyle(21);
-    g_this->SetMarkerSize(2.);
-    g_this->SetMarkerColor(kThisWorkColor);
-    g_this->SetLineColor(kThisWorkColor);
-    g_this->SetLineWidth(2);
-    g_this->Draw("P SAME");
-    leg->AddEntry(g_this, "This work", "lp");
-
-    leg->AddEntry(line, "Isotropic", "l");
-    leg->Draw();
+    lg->AddEntry(line, "Isotropic", "l");
+    lg->Draw();
+    drawTag();
     c->RedrawAxis();
     c->SaveAs(outname.c_str());
 }
 
-
 // ------------------------------------------------------------------------
-// Per-point pull: (y_ext - y_this_interp) / sqrt(sigma_ext^2 + sigma_this_interp^2)
-//
-// Both this-work's value AND its uncertainty are linearly interpolated
-// (in log E) to the EXFOR point's energy. Interpolating an uncertainty
-// linearly is an approximation (the true point-to-point correlation of
-// this-work's own systematic effects is not modeled), but it is the
-// standard practical choice for this kind of compatibility check, and
-// is far more honest than ignoring this-work's error entirely.
-//
-// A well-matched dataset should show pulls scattered around 0 with an
-// RMS near 1; a systematically low/high or over/under-dispersed pull
-// distribution flags disagreement or an underestimated uncertainty.
+// Pull por punto:  (y_ext - y_this_interp) / sqrt(sigma_ext^2 + sigma_this^2)
+// Valor e incertidumbre de este trabajo se interpolan linealmente en log E.
+// Un conjunto compatible da pulls centrados en 0 con RMS cercano a 1.
 // ------------------------------------------------------------------------
 struct PullSeries {
     TGraph* graph = nullptr;   // x = E_n (MeV), y = pull
@@ -758,55 +1059,63 @@ struct PullSeries {
     double  rms   = 0.0;
     int     n     = 0;
 };
- 
+
 static PullSeries computePulls(TGraphErrors* ext, TGraphErrors* mine)
 {
     PullSeries out;
     int nMine = mine->GetN();
     if(nMine < 2) return out;
- 
+
     double* mx  = mine->GetX();
     double* my  = mine->GetY();
     double* mey = mine->GetEY();
- 
+
     std::vector<double> px, py;
     double sum = 0.0, sum2 = 0.0;
- 
+
     for(int i = 0; i < ext->GetN(); ++i){
         double x = ext->GetX()[i];
-        if(x < mx[0] || x > mx[nMine-1]) continue;   // no extrapolation
- 
+        if(x < mx[0] || x > mx[nMine-1]) continue;
+
         int k = (int)(std::lower_bound(mx, mx+nMine, x) - mx);
         if(k == 0) k = 1;
         double x0 = mx[k-1], x1 = mx[k];
         double t  = (std::log(x) - std::log(x0)) / (std::log(x1) - std::log(x0));
- 
+
         double yInterp  = my[k-1]  + t * (my[k]  - my[k-1]);
         double eyInterp = mey[k-1] + t * (mey[k] - mey[k-1]);
- 
+
         double ey_ext = ext->GetEY()[i];
         double sigma  = std::sqrt(ey_ext*ey_ext + eyInterp*eyInterp);
         if(sigma <= 0.0) continue;
- 
+
         double pull = (ext->GetY()[i] - yInterp) / sigma;
         px.push_back(x);
         py.push_back(pull);
         sum  += pull;
         sum2 += pull*pull;
     }
- 
+
     if(px.empty()) return out;
- 
+
     out.n     = (int)px.size();
     out.mean  = sum / out.n;
     out.rms   = std::sqrt(sum2 / out.n);
     out.graph = new TGraph(out.n, px.data(), py.data());
     return out;
 }
- 
+
+// dibuja el fondo comun de un panel de pulls: banda +-1, lineas 0 y +-2
+static void drawPullGuides(double xmin, double xmax)
+{
+    drawBand(xmin, xmax, -1.0, 1.0);
+    drawHLine(xmin, xmax,  0.0, 1, kRefGray);
+    drawHLine(xmin, xmax,  2.0, 3, kRefGray);
+    drawHLine(xmin, xmax, -2.0, 3, kRefGray);
+}
+
 // ------------------------------------------------------------------------
-// Grid of pull plots, one panel per EXFOR source, to see which dataset
-// is best matched (pulls near 0, RMS near 1) without cross-clutter.
+// Pulls, un panel por conjunto de EXFOR.
 // ------------------------------------------------------------------------
 static void plotPullsVsExfor(
     TGraphErrors* g_this,
@@ -815,84 +1124,62 @@ static void plotPullsVsExfor(
     double xmin = 1.1, double xmax = 2000.0)
 {
     setPubStyle();
- 
+
     std::vector<ExforData> exfor;
     for(auto& s : sources){
         ExforData d = loadExforAniso(s);
         if(d.graph) exfor.push_back(d);
     }
     if(exfor.empty() || !g_this) return;
- 
+
     int ncol, nrow;
     gridLayout((int)exfor.size(), ncol, nrow);
- 
-    TCanvas* c = new TCanvas("c_pulls", "Pulls vs EXFOR", 480*ncol, 420*nrow);
-    c->Divide(ncol, nrow, 0.0002, 0.0002);
- 
-    std::vector<int> pal = exforPalette();
- 
+
+    TCanvas* c = new TCanvas(uniqueName("c_pulls").c_str(), "Pulls vs EXFOR", 520*ncol, 440*nrow);
+    c->Divide(ncol, nrow, 0.001, 0.001);
+
+    const std::vector<int> pal = exforPalette();
+
     for(size_t k = 0; k < exfor.size(); ++k){
-        int color = pal[k % pal.size()];
- 
+        const int color = pal[k % pal.size()];
         PullSeries p = computePulls(exfor[k].graph, g_this);
- 
+
         TVirtualPad* pad = c->cd((int)k + 1);
         stylePad(pad);
+        pad->SetLeftMargin(0.20);
+        pad->SetBottomMargin(0.16);
+        pad->SetTopMargin(0.10);
         pad->SetLogx();
- 
-        double ymax = 4.0;
-        if(p.graph){
+
+        double ymax = 3.0;
+        if(p.graph)
             for(int i = 0; i < p.graph->GetN(); ++i)
-                ymax = std::max(ymax, std::abs(p.graph->GetY()[i]) * 1.2);
-        }
- 
-        TH1F* frame = pad->DrawFrame(xmin, -ymax, xmax, ymax);
-        frame->GetXaxis()->SetTitle("E_{n} (MeV)");
-        frame->GetYaxis()->SetTitle("pull  = (data - this work) / #sigma");
-        frame->GetXaxis()->SetTitleOffset(1.15);
-        frame->GetYaxis()->SetTitleOffset(1.3);
-        frame->GetXaxis()->SetMoreLogLabels();
-        frame->GetXaxis()->SetNoExponent();
- 
-        TLine* l0 = new TLine(xmin, 0.0, xmax, 0.0);
-        l0->SetLineColor(kGray+2); l0->SetLineWidth(1);
-        l0->Draw();
-        TLine* lp1 = new TLine(xmin,  1.0, xmax,  1.0);
-        TLine* lm1 = new TLine(xmin, -1.0, xmax, -1.0);
-        lp1->SetLineStyle(2); lp1->SetLineColor(kGray+1);
-        lm1->SetLineStyle(2); lm1->SetLineColor(kGray+1);
-        lp1->Draw(); lm1->Draw();
-        TLine* lp2 = new TLine(xmin,  2.0, xmax,  2.0);
-        TLine* lm2 = new TLine(xmin, -2.0, xmax, -2.0);
-        lp2->SetLineStyle(3); lp2->SetLineColor(kGray);
-        lm2->SetLineStyle(3); lm2->SetLineColor(kGray);
-        lp2->Draw(); lm2->Draw();
- 
+                ymax = std::max(ymax, 1.2 * std::abs(p.graph->GetY()[i]));
+        // hueco arriba para la linea de estadisticos
+        const double yTop = withHeadroom(-ymax, ymax, legendFrac(pad, 1, 0.06));
+
+        TH1F* fr = pad->DrawFrame(xmin, -ymax, xmax, yTop);
+        styleFrame(fr, "E_{n} (MeV)", "(data #minus this work) / #sigma", 1.0, 1.35);
+        logXLabels(pad, fr, xmin, xmax);
+        drawPullGuides(xmin, xmax);
+
         if(p.graph){
-            p.graph->SetMarkerStyle(24);
-            p.graph->SetMarkerSize(1.);
-            p.graph->SetMarkerColor(color);
-            p.graph->SetLineColor(color);
-            p.graph->Draw("P SAME");
+            styleGraph(p.graph, color, 20, 0.9);
+            p.graph->Draw("P");
+
+            TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.046);
+            t.SetTextColor(kInk); t.SetTextAlign(13);
+            t.DrawLatex(pad->GetLeftMargin() + 0.03, 1.0 - pad->GetTopMargin() - 0.02,
+                Form("#LTpull#GT = %.2f    RMS = %.2f    N = %d", p.mean, p.rms, p.n));
         }
- 
-        TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
-        lat.SetTextSize(0.055); lat.SetTextAlign(13);
-        lat.DrawLatex(0.06, 0.92, exfor[k].label.c_str());
- 
-        if(p.graph){
-            lat.SetTextAlign(33);
-            lat.SetTextSize(0.048);
-            lat.DrawLatex(0.94, 0.92,
-                Form("#LTpull#GT=%.2f  RMS=%.2f  (N=%d)", p.mean, p.rms, p.n));
-        }
+        padHeader(exfor[k].label, "", 0.055, color);
+        pad->RedrawAxis();
     }
     c->SaveAs(outname.c_str());
 }
- 
+
 // ------------------------------------------------------------------------
-// Overlay of all sources' pulls in one figure, for a direct side-by-side
-// read of which dataset sits closest to 0 with the tightest scatter.
+// Pulls de todos los conjuntos superpuestos.
 // ------------------------------------------------------------------------
 static void plotPullsOverlay(
     TGraphErrors* g_this,
@@ -901,65 +1188,58 @@ static void plotPullsOverlay(
     double xmin = 1.1, double xmax = 2000.0)
 {
     setPubStyle();
- 
+
     std::vector<ExforData> exfor;
     for(auto& s : sources){
         ExforData d = loadExforAniso(s);
         if(d.graph) exfor.push_back(d);
     }
     if(exfor.empty() || !g_this) return;
- 
+
     std::vector<PullSeries> pulls;
-    double ymax = 4.0;
+    double ymax = 3.0;
     for(auto& d : exfor){
         PullSeries p = computePulls(d.graph, g_this);
         if(p.graph)
             for(int i = 0; i < p.graph->GetN(); ++i)
-                ymax = std::max(ymax, std::abs(p.graph->GetY()[i]) * 1.2);
+                ymax = std::max(ymax, 1.2 * std::abs(p.graph->GetY()[i]));
         pulls.push_back(p);
     }
- 
-    TCanvas* c = new TCanvas("c_pulls_overlay", "Pulls overlay", 900, 650);
+
+    TCanvas* c = new TCanvas(uniqueName("c_pulls_overlay").c_str(), "Pulls overlay", 880, 640);
+    stylePad(c);
+    reserveTag(c);
     c->SetLogx();
-    stylePad(gPad);
- 
-    TH1F* frame = c->DrawFrame(xmin, -ymax, xmax, ymax);
-    frame->GetXaxis()->SetTitle("E_{n} (MeV)");
-    frame->GetYaxis()->SetTitle("pull");
-    frame->GetXaxis()->SetTitleOffset(1.15);
-    frame->GetYaxis()->SetTitleOffset(1.3);
-    frame->GetXaxis()->SetMoreLogLabels();
-    frame->GetXaxis()->SetNoExponent();
- 
-    TLine* l0 = new TLine(xmin, 0.0, xmax, 0.0);
-    l0->SetLineColor(kGray+2); l0->SetLineWidth(1); l0->Draw();
-    TLine* lp1 = new TLine(xmin, 1.0, xmax, 1.0);
-    TLine* lm1 = new TLine(xmin,-1.0, xmax,-1.0);
-    lp1->SetLineStyle(2); lp1->SetLineColor(kGray+1);
-    lm1->SetLineStyle(2); lm1->SetLineColor(kGray+1);
-    lp1->Draw(); lm1->Draw();
- 
-    std::vector<int> pal = exforPalette();
-    TLegend* leg = new TLegend(0.55, 0.72, 0.93, 0.92);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
- 
+
+    const int    rows = (int)exfor.size();
+    const double rowH = 0.048;
+    const double yTop = withHeadroom(-ymax, ymax, legendFrac(c, rows, rowH));
+
+    TH1F* fr = c->DrawFrame(xmin, -ymax, xmax, yTop);
+    styleFrame(fr, "E_{n} (MeV)", "(data #minus this work) / #sigma");
+    logXLabels(c, fr, xmin, xmax);
+    drawPullGuides(xmin, xmax);
+
+    const std::vector<int> pal = exforPalette();
+    TLegend* lg = topLegend(c, rows, rowH, 0.034);
+
     for(size_t k = 0; k < exfor.size(); ++k){
         if(!pulls[k].graph) continue;
-        int color = pal[k % pal.size()];
-        pulls[k].graph->SetMarkerStyle(21 + (int)(k % 2));  // open circle / open square
-        pulls[k].graph->SetMarkerSize(0.4);
-        pulls[k].graph->SetMarkerColor(color);
-        pulls[k].graph->SetLineColor(color);
-        pulls[k].graph->Draw("P SAME");
-        leg->AddEntry(pulls[k].graph,
-            Form("%s  (#LTpull#GT=%.2f, RMS=%.2f)",
+        styleGraph(pulls[k].graph, pal[k % pal.size()], kOpenMarkers[k % 6], 1.0, 1);
+        pulls[k].graph->Draw("P");
+        lg->AddEntry(pulls[k].graph,
+            Form("%s   #LTpull#GT = %.2f,  RMS = %.2f",
                  exfor[k].label.c_str(), pulls[k].mean, pulls[k].rms), "p");
     }
-    leg->Draw();
+    lg->Draw();
+    drawTag();
     c->RedrawAxis();
     c->SaveAs(outname.c_str());
 }
+
+// ------------------------------------------------------------------------
+// Este trabajo frente a cada conjunto de EXFOR, un panel por conjunto.
+// ------------------------------------------------------------------------
 static void plotAnisoVsExforIndividual(
     TGraphErrors* g_this,
     const std::vector<ExforSource>& sources,
@@ -967,86 +1247,81 @@ static void plotAnisoVsExforIndividual(
     double xmin = 1.1, double xmax = 1000.0)
 {
     setPubStyle();
- 
+
     std::vector<ExforData> exfor;
     for(auto& s : sources){
         ExforData d = loadExforAniso(s);
         if(d.graph) exfor.push_back(d);
     }
     if(exfor.empty() || !g_this) return;
- 
+
     int ncol, nrow;
     gridLayout((int)exfor.size(), ncol, nrow);
- 
-    TCanvas* c = new TCanvas("c_aniso_exfor_grid", "This work vs each EXFOR set",
-                             480*ncol, 420*nrow);
-    c->Divide(ncol, nrow, 0.0002, 0.0002);
- 
-    std::vector<int> pal = exforPalette();
- 
+
+    TCanvas* c = new TCanvas(uniqueName("c_aniso_exfor_grid").c_str(),
+                             "This work vs each EXFOR set", 520*ncol, 440*nrow);
+    c->Divide(ncol, nrow, 0.001, 0.001);
+
+    const std::vector<int> pal = exforPalette();
+
     for(size_t k = 0; k < exfor.size(); ++k){
-        int color = pal[k % pal.size()];
- 
-        double ymin = 1e9, ymax = -1e9;
+        const int color = pal[k % pal.size()];
+
+        double ymin = 1.0, ymax = 1.0;
         auto updateRange = [&](TGraphErrors* g){
             for(int i = 0; i < g->GetN(); ++i){
-                double v = g->GetY()[i], e = g->GetEY()[i];
+                const double x = g->GetX()[i];
+                if(x < xmin || x > xmax) continue;
+                const double v = g->GetY()[i], e = g->GetEY()[i];
                 ymin = std::min(ymin, v - e);
                 ymax = std::max(ymax, v + e);
             }
         };
         updateRange(g_this);
         updateRange(exfor[k].graph);
-        double margin = (ymax - ymin) * 0.20;
-        ymin -= margin; ymax += margin;
- 
+        const double m = 0.08 * (ymax - ymin);
+
         TVirtualPad* pad = c->cd((int)k + 1);
         stylePad(pad);
+        pad->SetLeftMargin(0.20);
+        pad->SetBottomMargin(0.16);
+        pad->SetTopMargin(0.10);
         pad->SetLogx();
- 
-        TH1F* frame = pad->DrawFrame(xmin, ymin, xmax, ymax);
-        frame->GetXaxis()->SetTitle("E_{n} (MeV)");
-        frame->GetYaxis()->SetTitle("W(0^{#circ})/W(90^{#circ})");
-        frame->GetXaxis()->SetTitleOffset(1.15);
-        frame->GetYaxis()->SetTitleOffset(1.35);
-        frame->GetXaxis()->SetMoreLogLabels();
-        frame->GetXaxis()->SetNoExponent();
- 
-        TLine* line = new TLine(xmin, 1.0, xmax, 1.0);
-        line->SetLineStyle(2);
-        line->SetLineColor(kGray+1);
-        line->Draw();
- 
-        exfor[k].graph->SetMarkerStyle(24);
-        exfor[k].graph->SetMarkerSize(0.4);
-        exfor[k].graph->SetMarkerColor(color);
-        exfor[k].graph->SetLineColor(color);
-        exfor[k].graph->Draw("P SAME");
- 
-        g_this->SetMarkerStyle(21);
-        g_this->SetMarkerSize(0.5);
-        g_this->SetMarkerColor(kThisWorkColor);
-        g_this->SetLineColor(kThisWorkColor);
-        g_this->Draw("P SAME");
- 
-        TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
-        lat.SetTextSize(0.055); lat.SetTextAlign(13);
-        lat.DrawLatex(0.06, 0.92, exfor[k].label.c_str());
- 
+
+        const double ylo  = ymin - m;
+        const double yTop = withHeadroom(ylo, ymax + m, legendFrac(pad, 1, 0.065));
+
+        TH1F* fr = pad->DrawFrame(xmin, ylo, xmax, yTop);
+        styleFrame(fr, "E_{n} (MeV)", "W(0^{#circ})/W(90^{#circ})", 1.0, 1.35);
+        logXLabels(pad, fr, xmin, xmax);
+        drawHLine(xmin, xmax, 1.0);
+
+        TGraphErrors* ge = (TGraphErrors*)exfor[k].graph->Clone();
+        styleGraph(ge, color, 24, 0.9, 1);
+        ge->Draw("P");
+
+        TGraphErrors* gt = (TGraphErrors*)g_this->Clone();
+        styleGraph(gt, kThisWorkColor, 21, 1.0, 2);
+        gt->Draw("P");
+
+        TLegend* lg = topLegend(pad, 1, 0.065, 0.046);
+        lg->SetNColumns(2);
+        lg->AddEntry(gt, "This work", "pe");
+        lg->AddEntry(ge, exfor[k].label.c_str(), "pe");
+        lg->Draw();
+
         double chi2n; int nUsed;
-        if(chi2PerPointVsThis(exfor[k].graph, g_this, chi2n, nUsed)){
-            lat.SetTextAlign(33);
-            lat.SetTextSize(0.050);
-            lat.DrawLatex(0.94, 0.92,
-                Form("#chi^{2}/N #approx %.2f  (N=%d)", chi2n, nUsed));
-        }
+        const std::string right = chi2PerPointVsThis(exfor[k].graph, g_this, chi2n, nUsed)
+            ? std::string(Form("#chi^{2}/N #approx %.2f  (N = %d)", chi2n, nUsed))
+            : std::string("");
+        padHeader(exfor[k].label, right, 0.050, color);
+        pad->RedrawAxis();
     }
     c->SaveAs(outname.c_str());
 }
+
 // ------------------------------------------------------------------------
-// W(cos theta)/W(90) per energy bin: measured points + Legendre fit curve.
-// Points are normalised with the *fitted* W(90), so points and curve share
-// the same normalisation. step > 1 draws only every step-th energy bin.
+// Curva normalizada W(cos theta)/W(90) de la serie de Legendre
 // ------------------------------------------------------------------------
 static double legendreRatioCurve(double* x, double* p)
 {
@@ -1056,11 +1331,112 @@ static double legendreRatioCurve(double* x, double* p)
     return N / D;
 }
 
+// ------------------------------------------------------------------------
+// W(0)/W(90) del ajuste de Legendre frente a la energia.
+// Guarda <outname>.pdf y <outname>.root (grafico "anisotropy_ratio") y
+// devuelve el grafico para plotAnisoVsExfor / plotPulls*.
+// ------------------------------------------------------------------------
+static TGraphErrors* plotAnisotropyRatioFit(
+    const std::vector<LegendreResult>& leg,
+    const std::vector<double>& energy_bins,
+    const std::string& outname,
+    const std::string& reaction_label = "W(0^{#circ})/W(90^{#circ})")
+{
+    setPubStyle();
+
+    std::vector<double> x, y, ex, ey, xl, xh;
+    for(int e = 0; e < (int)leg.size(); ++e){
+        if(!leg[e].valid) continue;
+        const double xc = std::sqrt(energy_bins[e] * energy_bins[e+1]);
+        x.push_back(xc);
+        ex.push_back(0.0);
+        xl.push_back(xc - energy_bins[e]);
+        xh.push_back(energy_bins[e+1] - xc);
+        y.push_back(leg[e].anisotropy);
+        ey.push_back(leg[e].u_anisotropy);
+    }
+    if(x.empty()){
+        std::cerr << "[WARN] plotAnisotropyRatioFit: no valid fits\n";
+        return nullptr;
+    }
+
+    // resultado (se devuelve y se guarda como siempre)
+    TGraphErrors* g = new TGraphErrors(
+        (int)x.size(), x.data(), y.data(), ex.data(), ey.data());
+    g->SetName("anisotropy_ratio");
+    styleGraph(g, kRatioColor, 20, 1.1);
+
+    // para dibujar: barra horizontal = bin de energia
+    TGraphAsymmErrors* gd = new TGraphAsymmErrors(
+        (int)x.size(), x.data(), y.data(), xl.data(), xh.data(), ey.data(), ey.data());
+    styleGraph(gd, kRatioColor, 20, 1.15, 2);
+
+    double ymin = 0.95, ymax = 1.05;
+    for(size_t i = 0; i < y.size(); ++i){
+        ymin = std::min(ymin, y[i] - ey[i]);
+        ymax = std::max(ymax, y[i] + ey[i]);
+    }
+
+    const double xmin = energy_bins.front(), xmax = energy_bins.back();
+
+    TCanvas* c = new TCanvas(uniqueName("c_ratio_fit").c_str(), "", 820, 620);
+    stylePad(c);
+    reserveTag(c);
+    c->SetLogx();
+
+    const double m    = 0.08 * (ymax - ymin);
+    const double ylo  = ymin - m;
+    const double yTop = withHeadroom(ylo, ymax + m, legendFrac(c, 3, 0.052));
+
+    TH1F* fr = c->DrawFrame(xmin, ylo, xmax, yTop);
+    styleFrame(fr, "E_{n} (MeV)", "W(0^{#circ}) / W(90^{#circ})");
+    logXLabels(c, fr, xmin, xmax);
+
+    TGraph* band = drawBand(xmin, xmax, 0.95, 1.05);
+    TLine*  line = drawHLine(xmin, xmax, 1.0, 7, kRefGray, 2);
+    gd->Draw("P");
+
+    TLegend* lg = topLegend(c, 3, 0.052, 0.038, 0.0, 0.72);
+    lg->AddEntry(gd,   (reaction_label + "  (Legendre fit)").c_str(), "pe");
+    lg->AddEntry(line, "Isotropic",  "l");
+    lg->AddEntry(band, "#pm5% band", "f");
+    lg->Draw();
+
+    drawTag();
+    c->RedrawAxis();
+    c->SaveAs((outname + ".pdf").c_str());
+
+    TFile* fout = TFile::Open((outname + ".root").c_str(), "RECREATE");
+    if(fout && !fout->IsZombie()){
+        g->Write("anisotropy_ratio");
+        fout->Close();
+    } else {
+        std::cerr << "[ERROR] Cannot create " << outname << ".root\n";
+    }
+    return g;
+}
+
+// ------------------------------------------------------------------------
+// W(cos theta)/W(90) por bin de energia: puntos + ajuste de Legendre y,
+// debajo, los residuos normalizados del ajuste
+//
+//      pull_k = (y_k - f(cos theta_k)) / sigma_k ,
+//
+// con y_k = w_k/W90 y sigma_k = u_w_k/W90. Dividir por W90 no cambia el
+// cociente, asi que la suma de pull^2 es el chi^2 del ajuste.
+//
+// Colores: datos en azul, ajuste en terracota, residuos en verde azulado.
+// showResiduals = false da la figura sin panel de residuos.
+// La leyenda (solo panel 1) ocupa una fila en dos columnas y los
+// parametros del ajuste van con letra algo menor: el bloque de texto
+// quita menos altura a los datos que antes.
+// ------------------------------------------------------------------------
 static void plotAnisotropyFit(
     const std::vector<LegendreResult>& leg,
     const std::vector<double>& energy_bins,
     const std::string& outname,
-    int step = 1)
+    int  step          = 1,
+    bool showResiduals = true)
 {
     setPubStyle();
 
@@ -1075,173 +1451,161 @@ static void plotAnisotropyFit(
     int ncol, nrow;
     gridLayout((int)sel.size(), ncol, nrow);
 
-    TCanvas* c = new TCanvas("c_aniso_fit", "Anisotropy fits", 480*ncol, 420*nrow);
-    c->Divide(ncol, nrow, 0.0002, 0.0002);
+    const int cellW = 520;
+    const int cellH = showResiduals ? 590 : 450;
+    TCanvas* c = new TCanvas(uniqueName("c_aniso_fit").c_str(), "Anisotropy fits",
+                             cellW*ncol, cellH*nrow);
+    c->Divide(ncol, nrow, 0.001, 0.001);
+
+    // reparto de la celda y factores de escala de la letra
+    const double fUp = showResiduals ? 0.70 : 1.0;
+    const double fLo = 1.0 - fUp;
+    const double sUp = 1.0 / fUp;
+    const double sLo = showResiduals ? 1.0 / fLo : 1.0;
+
+    // margenes en fraccion de la altura de CELDA
+    const double kTopCell = 0.085;
+    const double kBotCell = 0.135;
+    const double kLeft    = 0.21;
+    const double kRight   = 0.04;
 
     for(size_t p = 0; p < sel.size(); ++p){
-        int e = sel[p];
+        const int e = sel[p];
         const LegendreResult& L = leg[e];
 
-        int n = (int)L.w.size();
+        // --- puntos normalizados -------------------------------------------
+        const int n = (int)L.w.size();
         std::vector<double> y(n), ey(n), ex(n, 0.0);
-        double ymin = 1e9, ymax = -1e9;
+        double ymin = 1.0, ymax = std::max(1.0, L.anisotropy);
         for(int k = 0; k < n; ++k){
             y[k]  = L.w[k]   / L.W90;
             ey[k] = L.u_w[k] / L.W90;
             ymin = std::min(ymin, y[k] - ey[k]);
             ymax = std::max(ymax, y[k] + ey[k]);
         }
-        ymin = std::min(ymin, 1.0);
-        ymax = std::max(ymax, L.anisotropy);
-        double margin = 0.15 * (ymax - ymin);
-        ymin = std::max(0.0, ymin - margin);
-        ymax = ymax + 2.5 * margin;             // headroom for labels
+        const double m   = 0.08 * (ymax - ymin);
+        const double ylo = std::max(0.0, ymin - m);
+        const double yhi = ymax + m;
 
-        TVirtualPad* pad = c->cd((int)p + 1);
-        stylePad(pad);
-        pad->SetLeftMargin(0.18);
-        pad->SetBottomMargin(0.16);
+        // --- residuos normalizados -----------------------------------------
+        std::vector<double> px, py;
+        double pmax = 0.0;
+        double par[2] = {L.a2, L.a4};
+        for(int k = 0; k < n; ++k){
+            if(ey[k] <= 0.0) continue;
+            double xk = L.cos_theta[k];
+            const double fk = legendreRatioCurve(&xk, par);
+            const double pk = (y[k] - fk) / ey[k];
+            px.push_back(xk);
+            py.push_back(pk);
+            pmax = std::max(pmax, std::abs(pk));
+        }
 
-        TH1F* frame = pad->DrawFrame(0.0, ymin, 1.0, ymax);
-        frame->GetXaxis()->SetTitle("cos(#theta_{beam})");
-        frame->GetYaxis()->SetTitle("W(#theta) / W(90^{#circ})");
-        frame->GetXaxis()->SetTitleOffset(1.05);
-        frame->GetYaxis()->SetTitleOffset(1.35);
+        // --- sub-pads -------------------------------------------------------
+        TVirtualPad* cell = c->cd((int)p + 1);
+        TVirtualPad* pUp  = cell;
+        TPad*        pLo  = nullptr;
+        if(showResiduals){
+            cell->cd();
+            TPad* up = new TPad(uniqueName(Form("pad_up_%d", e)).c_str(), "", 0.0, fLo, 1.0, 1.0);
+            TPad* lo = new TPad(uniqueName(Form("pad_lo_%d", e)).c_str(), "", 0.0, 0.0, 1.0, fLo);
+            up->Draw();
+            lo->Draw();
+            pUp = up;
+            pLo = lo;
+        }
 
-        TLine* ref = new TLine(0.0, 1.0, 1.0, 1.0);
-        ref->SetLineStyle(2);
-        ref->SetLineColor(kGray + 1);
-        ref->Draw();
+        // ===================== panel principal ==============================
+        pUp->cd();
+        stylePad(pUp);
+        pUp->SetLeftMargin(kLeft);
+        pUp->SetRightMargin(kRight);
+        pUp->SetTopMargin(kTopCell * sUp);
+        pUp->SetBottomMargin(showResiduals ? 0.015 : kBotCell);
 
-        TF1* f = new TF1(Form("f_legfit_%d", e), legendreRatioCurve, 0., 1., 2);
+        // bloque de texto: [leyenda en una fila, solo panel 1] + a2, (a4),
+        // W(0)/W(90), chi2
+        const bool   showA4  = L.u_a4 > 0.0;
+        const bool   withLeg = (p == 0);
+        const int    nText   = (showA4 ? 4 : 3) + (withLeg ? 1 : 0);
+        const double tsz     = 0.038 * sUp;
+        const double lineH   = 0.052 * sUp;
+        const double yTop    = withHeadroom(ylo, yhi, legendFrac(pUp, nText, lineH));
+
+        TH1F* frame = pUp->DrawFrame(0.0, ylo, 1.0, yTop);
+        styleFrame(frame, "cos#theta_{beam}", "W(#theta)/W(90^{#circ})", 0.92 * sUp, 1.30);
+        if(showResiduals){
+            frame->GetXaxis()->SetLabelSize(0.0);
+            frame->GetXaxis()->SetTitleSize(0.0);
+        }
+        drawHLine(0.0, 1.0, 1.0);
+
+        TF1* f = new TF1(uniqueName(Form("f_legfit_%d", e)).c_str(), legendreRatioCurve, 0., 1., 2);
         f->SetParameters(L.a2, L.a4);
-        f->SetLineColor(kBkgFitColor);
+        f->SetLineColor(kFitColor);
         f->SetLineWidth(2);
-        f->SetNpx(200);
+        f->SetNpx(300);
         f->Draw("SAME");
 
         TGraphErrors* g = new TGraphErrors(
             n, L.cos_theta.data(), y.data(), ex.data(), ey.data());
-        g->SetMarkerStyle(20);
-        g->SetMarkerSize(1.5);
-        g->SetMarkerColor(kAnisoColor);
-        g->SetLineColor(kAnisoColor);
-        g->SetLineWidth(2);
-        g->Draw("P SAME");
+        styleGraph(g, kAnisoColor, 20, 1.1, 2);
+        g->Draw("P");
 
+        const double xT = kLeft + 0.035;
+        double yT = 1.0 - pUp->GetTopMargin() - 0.02;
+
+        // leyenda solo en el primer panel, una fila, dos columnas
+        if(withLeg){
+            TLegend* lg = makeLegend(xT - 0.01, yT - lineH, 0.78, yT, tsz);
+            lg->SetNColumns(2);
+            lg->SetMargin(0.30);
+            lg->AddEntry(g, "Data",         "pe");
+            lg->AddEntry(f, "Legendre fit", "l");
+            lg->Draw();
+            yT -= lineH + 0.006;
+        }
+
+        // parametros del ajuste, debajo
         TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
-        lat.SetTextAlign(33);
-        lat.SetTextSize(0.060);
-        lat.DrawLatex(0.94, 0.90,
-            Form("%.0f-%.0f MeV", energy_bins[e], energy_bins[e+1]));
-        lat.SetTextAlign(13);
-        lat.SetTextSize(0.048);
-        lat.DrawLatex(0.22, 0.90, Form("a_{2} = %.3f #pm %.3f", L.a2, L.u_a2));
-        lat.DrawLatex(0.22, 0.83, Form("W(0)/W(90) = %.3f #pm %.3f",
-                                       L.anisotropy, L.u_anisotropy));
-        lat.DrawLatex(0.22, 0.76, Form("#chi^{2}/ndf = %.2f", L.chi2ndf));
+        lat.SetTextColor(kInk); lat.SetTextAlign(13);
+        lat.SetTextSize(tsz);
+        lat.DrawLatex(xT, yT, Form("a_{2} = %.3f #pm %.3f", L.a2, L.u_a2));             yT -= lineH;
+        if(showA4){
+            lat.DrawLatex(xT, yT, Form("a_{4} = %.3f #pm %.3f", L.a4, L.u_a4));         yT -= lineH;
+        }
+        lat.DrawLatex(xT, yT, Form("W(0^{#circ})/W(90^{#circ}) = %.3f #pm %.3f",
+                                   L.anisotropy, L.u_anisotropy));                      yT -= lineH;
+        lat.DrawLatex(xT, yT, Form("#chi^{2}/ndf = %.2f", L.chi2ndf));
 
-        pad->RedrawAxis();
+        padHeader(energyHeader(energy_bins[e], energy_bins[e+1]), "", 0.048 * sUp);
+        pUp->RedrawAxis();
+
+        if(!showResiduals) continue;
+
+        // ===================== panel de residuos ============================
+        pLo->cd();
+        pLo->SetLeftMargin(kLeft);
+        pLo->SetRightMargin(kRight);
+        pLo->SetTopMargin(0.035);
+        pLo->SetBottomMargin(kBotCell * sLo);
+        pLo->SetTickx(1);
+        pLo->SetTicky(1);
+        pLo->SetFillColor(kWhite);
+
+        const double pr = std::max(2.8, 1.25 * pmax);
+        TH1F* fr2 = pLo->DrawFrame(0.0, -pr, 1.0, pr);
+        styleFrame(fr2, "cos#theta_{beam}", "Pull", 0.92 * sLo, 1.30);
+        fr2->GetYaxis()->SetNdivisions(503);
+        fr2->GetYaxis()->CenterTitle();
+        drawPullGuides(0.0, 1.0);
+
+        if(!px.empty()){
+            TGraph* gp = new TGraph((int)px.size(), px.data(), py.data());
+            styleGraph(gp, kResidColor, 20, 0.75);
+            gp->Draw("P");
+        }
+        pLo->RedrawAxis();
     }
     c->SaveAs(outname.c_str());
-}
-
-// ------------------------------------------------------------------------
-// W(0)/W(90) from the Legendre fit vs neutron energy.
-// Saves <outname>.pdf and <outname>.root (graph "anisotropy_ratio") and
-// returns the graph, ready for plotAnisoVsExfor / plotPulls*.
-// ------------------------------------------------------------------------
-static TGraphErrors* plotAnisotropyRatioFit(
-    const std::vector<LegendreResult>& leg,
-    const std::vector<double>& energy_bins,
-    const std::string& outname,
-    const std::string& reaction_label = "W(0^{#circ})/W(90^{#circ})")
-{
-    setPubStyle();
-
-    std::vector<double> x, y, ex, ey;
-    for(int e = 0; e < (int)leg.size(); ++e){
-        if(!leg[e].valid) continue;
-        x .push_back(std::sqrt(energy_bins[e] * energy_bins[e+1]));
-        ex.push_back(0.0);
-        y .push_back(leg[e].anisotropy);
-        ey.push_back(leg[e].u_anisotropy);
-    }
-    if(x.empty()){
-        std::cerr << "[WARN] plotAnisotropyRatioFit: no valid fits\n";
-        return nullptr;
-    }
-
-    TGraphErrors* g = new TGraphErrors(
-        (int)x.size(), x.data(), y.data(), ex.data(), ey.data());
-    g->SetName("anisotropy_ratio");
-    g->SetMarkerStyle(20);
-    g->SetMarkerSize(1.5);
-    g->SetMarkerColor(kRatioColor);
-    g->SetLineColor(kRatioColor);
-    g->SetLineWidth(1);
-
-    double ymin = 1e9, ymax = -1e9;
-    for(size_t i = 0; i < y.size(); ++i){
-        ymin = std::min(ymin, y[i] - ey[i]);
-        ymax = std::max(ymax, y[i] + ey[i]);
-    }
-    ymin = std::min(ymin, 0.95);
-    ymax = std::max(ymax, 1.05);
-    double margin = 0.15 * (ymax - ymin);
-    ymin -= margin;
-    ymax += 2.0 * margin;
-
-    double xmin = energy_bins.front(), xmax = energy_bins.back();
-
-    TCanvas* c = new TCanvas("c_ratio_fit", "", 800, 650);
-    c->SetLogx();
-    stylePad(gPad);
-    c->SetLeftMargin(0.13);
-    c->SetBottomMargin(0.13);
-
-    TH1F* frame = c->DrawFrame(xmin, ymin, xmax, ymax);
-    frame->GetXaxis()->SetTitle("Neutron energy  E_{n}  (MeV)");
-    frame->GetYaxis()->SetTitle("W(0^{#circ}) / W(90^{#circ})");
-    frame->GetXaxis()->SetTitleOffset(1.2);
-    frame->GetYaxis()->SetTitleOffset(1.3);
-    frame->GetXaxis()->SetMoreLogLabels();
-    frame->GetXaxis()->SetNoExponent();
-
-    TGraph* band = new TGraph(4);
-    band->SetPoint(0, xmin, 1.05);
-    band->SetPoint(1, xmax, 1.05);
-    band->SetPoint(2, xmax, 0.95);
-    band->SetPoint(3, xmin, 0.95);
-    band->SetFillColorAlpha(kGray, 0.25);
-    band->SetLineWidth(0);
-    band->Draw("F SAME");
-
-    TLine* line = new TLine(xmin, 1.0, xmax, 1.0);
-    line->SetLineStyle(7);
-    line->SetLineColor(kGray+1);
-    line->SetLineWidth(2);
-    line->Draw();
-
-    g->Draw("P SAME");
-
-    TLegend* lg = new TLegend(0.50, 0.74, 0.93, 0.93);
-    lg->SetBorderSize(0);
-    lg->SetFillStyle(0);
-    lg->AddEntry(g,    (reaction_label + "  (Legendre fit)").c_str(), "lp");
-    lg->AddEntry(line, "Isotropic",   "l");
-    lg->AddEntry(band, "#pm5% band",  "f");
-    lg->Draw();
-
-    c->RedrawAxis();
-    c->SaveAs((outname + ".pdf").c_str());
-
-    TFile* fout = TFile::Open((outname + ".root").c_str(), "RECREATE");
-    if(fout && !fout->IsZombie()){
-        g->Write("anisotropy_ratio");
-        fout->Close();
-    } else {
-        std::cerr << "[ERROR] Cannot create " << outname << ".root\n";
-    }
-    return g;
 }

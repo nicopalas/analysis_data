@@ -59,7 +59,7 @@ static AnalysisConfig makeGoldConfig(
     c.output_tag      = tag;
     c.energy_bins     = energy_bins;
     c.efficiency_file = "/Users/nico/Desktop/Tese/Analysis/cross_section/output/Au-197/output_efficiency_gold.root";
-    c.energy_bins_eff = {50, 500, 1000};
+    c.energy_bins_eff = {60, 400, 1000};
     c.atoms = 9.17e17;
     return c;
 }

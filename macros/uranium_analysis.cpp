@@ -6,6 +6,7 @@
 #include "../include/acceptance.h"
 #include "../include/histograms.h"
 #include "../include/background_subtraction.h"
+#include "../include/efficiency_no_overlap.h"
 #include "../include/signal_selection.h"
 #include "../include/efficiency.h"
 #include "../include/anisotropy.h"
@@ -182,7 +183,7 @@ void uranium_analysis(){
     // ANISOTROPY — fine logarithmic binning
     // ================================================================
     const int nbins_aniso = 50;
-    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.2, 1000.0, 1.5);
+    std::vector<double> energy_bins_aniso = buildLogBins(nbins_aniso, 1.2, 1000.0, 1.3);
 
     AnalysisConfig cfg_aniso = makeUraniumConfig(energy_bins_aniso, "aniso");
 

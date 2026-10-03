@@ -30,7 +30,7 @@ static void compute_angles(
     double& cos_theta)
 {
     double dx = (2*x1 +2.5) - (2*x0 - 2.5);
-    double dy =  2*y1 - 2*y0 - (2*offsety1-2*offsety0);
+    double dy =  2*y1 - 2*y0;
     double dz =  5.0;
 
     double nd = std::sqrt(dx*dx + dy*dy + dz*dz);
@@ -72,6 +72,7 @@ static void fillHistograms(
     double tof1, tof0, neutron_energy;
     double  amp0, amp1;
     double x0,x1,y0,y1;
+    float x1_amp0, x2_amp0, y1_amp1, y2_amp1;
     double phi, phi_det;
     int RunNumber;
     float PulseIntensity;
@@ -85,6 +86,10 @@ static void fillHistograms(
     tree->SetBranchAddress("x0",           &x0);
     tree->SetBranchAddress("y0",           &y0);
     tree->SetBranchAddress("y1",           &y1);
+    tree->SetBranchAddress("y1_amp1",           &y1_amp1);
+    tree->SetBranchAddress("x1_amp0",           &x1_amp0);
+    tree->SetBranchAddress("x2_amp0",           &x2_amp0);
+    tree->SetBranchAddress("y2_amp1",           &y2_amp1);
     tree->SetBranchAddress("sumX0", &sumX0);
     tree->SetBranchAddress("sumX1", &sumX1);
     tree->SetBranchAddress("sumY1", &sumY1);
@@ -109,6 +114,9 @@ static void fillHistograms(
         double dt    = tof1 - tof0; 
         EventCuts c = getCuts(cfg.sample, neutron_energy);
         if (!passAmplitudeCut(amp0, amp1, c)) continue;
+        //if (cfg.sample == Sample::gold){
+            //if (x1_amp0-amp0+x2_amp0-amp0>-9000 || y1_amp1-amp1+y2_amp1-amp1>-6000) continue;
+        //}
         mean_x0 += x0;
         mean_x1 += x1;
         mean_y0 += y0;
@@ -127,6 +135,9 @@ static void fillHistograms(
         int e_bin = findBin(cfg.energy_bins, neutron_energy);
         if(e_bin < 0 || e_bin >= nbins) continue;
         if(neutron_energy > 1000) continue;
+        //if (cfg.sample == Sample::gold){
+          //  if (x1_amp0-amp0+x2_amp0-amp0>-9000 || y1_amp1-amp1+y2_amp1-amp1>-6000) continue;
+        //}
         double ratio = (amp1 - amp0) / (amp0 + amp1);
         double dt    = tof1 - tof0;   // (or compute later, but same thing)
         EventCuts c = getCuts(cfg.sample, neutron_energy);
@@ -150,7 +161,7 @@ static void fillHistograms(
         if(dt >= c.roi_min && dt <= c.roi_max){
             counts_roi[e_bin][j][ii]++;
             } 
-        else if(inUraniumPeak(dt, c) && cos_theta_det>0.6){
+        else if(inUraniumPeak(dt, c) && cos_theta_det_corrected>0.6){
             counts_upeak[e_bin][j][ii]++;
         }
         else{
